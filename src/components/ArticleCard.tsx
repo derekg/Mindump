@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import {
   Bookmark,
   BookmarkCheck,
@@ -6,6 +6,7 @@ import {
   ExternalLink,
   ChevronDown,
   Sparkles,
+  Heart,
 } from 'lucide-react';
 import type { WikiArticle } from '../types';
 import { useEngagement, useIntersectionObserver } from '../hooks';
@@ -15,12 +16,22 @@ import './ArticleCard.css';
 interface ArticleCardProps {
   article: WikiArticle;
   onLoadRelated?: (article: WikiArticle) => void;
+  onTopicClick?: (topic: string) => void;
 }
 
-export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
+// Extract topic hints from title
+function extractTopics(title: string): string[] {
+  const words = title.split(/[\s\-–—:,()]+/).filter(w => w.length > 3);
+  return words.slice(0, 3);
+}
+
+export function ArticleCard({ article, onLoadRelated, onTopicClick }: ArticleCardProps) {
   const [saved, setSaved] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showHeart, setShowHeart] = useState(false);
+  const lastTapRef = useRef<number>(0);
+  const imageRef = useRef<HTMLDivElement>(null);
 
   const { ref, isIntersecting } = useIntersectionObserver<HTMLDivElement>({
     threshold: 0.6,
@@ -54,6 +65,35 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
     setSaved(isArticleSaved(article.id));
   }, [article.id]);
 
+  // Parallax effect on scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      if (imageRef.current && isIntersecting) {
+        const rect = imageRef.current.getBoundingClientRect();
+        const scrollProgress = (window.innerHeight - rect.top) / (window.innerHeight + rect.height);
+        const parallaxOffset = (scrollProgress - 0.5) * 30;
+        imageRef.current.style.transform = `translateY(${parallaxOffset}px) scale(1.1)`;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [isIntersecting]);
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      // Double tap detected
+      if (!saved) {
+        saveArticle(article);
+        setSaved(true);
+        setShowHeart(true);
+        setTimeout(() => setShowHeart(false), 1000);
+      }
+    }
+    lastTapRef.current = now;
+  };
+
   const handleSave = () => {
     if (saved) {
       unsaveArticle(article.id);
@@ -62,6 +102,8 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
     } else {
       saveArticle(article);
       setSaved(true);
+      setShowHeart(true);
+      setTimeout(() => setShowHeart(false), 1000);
       setShowToast('Saved for later');
     }
     setTimeout(() => setShowToast(null), 2000);
@@ -95,24 +137,66 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
     }
   };
 
+  const handleTopicClick = (topic: string) => {
+    if (onTopicClick) {
+      onTopicClick(topic);
+    }
+  };
+
   const imageUrl = article.originalimage?.source || article.thumbnail?.source;
+  const topics = extractTopics(article.title);
 
   return (
-    <div ref={ref} className={`article-card ${isIntersecting ? 'visible' : ''}`}>
+    <div
+      ref={ref}
+      className={`article-card ${isIntersecting ? 'visible' : ''}`}
+      onClick={handleDoubleTap}
+    >
       {imageUrl && (
         <div className="article-image-container">
-          <img
-            src={imageUrl}
-            alt={article.title}
-            className="article-image"
-            loading="lazy"
-          />
+          <div className="article-image-wrapper" ref={imageRef}>
+            <img
+              src={imageUrl}
+              alt={article.title}
+              className="article-image"
+              loading="lazy"
+            />
+          </div>
           <div className="article-image-overlay" />
+          <div className="article-image-glow" />
+        </div>
+      )}
+
+      {/* Double-tap heart animation */}
+      {showHeart && (
+        <div className="heart-animation">
+          <Heart size={80} fill="white" />
         </div>
       )}
 
       <div className="article-content">
-        <h2 className="article-title" onClick={handleReadMore}>
+        {/* Topic pills */}
+        {topics.length > 0 && (
+          <div className="topic-pills">
+            {topics.map((topic, i) => (
+              <button
+                key={i}
+                className="topic-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTopicClick(topic);
+                }}
+              >
+                {topic}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <h2 className="article-title" onClick={(e) => {
+          e.stopPropagation();
+          handleReadMore();
+        }}>
           {article.title}
         </h2>
 
@@ -121,7 +205,10 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
         </p>
 
         {article.extract.length > 200 && (
-          <button className="expand-btn" onClick={handleExpand}>
+          <button className="expand-btn" onClick={(e) => {
+            e.stopPropagation();
+            handleExpand();
+          }}>
             <ChevronDown className={`expand-icon ${expanded ? 'rotated' : ''}`} />
             {expanded ? 'Show less' : 'Read more'}
           </button>
@@ -133,9 +220,9 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
           </div>
         )}
 
-        <div className="article-actions">
+        <div className="article-actions" onClick={(e) => e.stopPropagation()}>
           <button
-            className={`action-btn ${saved ? 'active' : ''}`}
+            className={`action-btn ${saved ? 'active saved-active' : ''}`}
             onClick={handleSave}
             aria-label={saved ? 'Remove from saved' : 'Save article'}
           >
@@ -168,6 +255,8 @@ export function ArticleCard({ article, onLoadRelated }: ArticleCardProps) {
             <span>Read full</span>
           </button>
         </div>
+
+        <p className="double-tap-hint">Double-tap to save</p>
       </div>
 
       {showToast && <div className="toast">{showToast}</div>}

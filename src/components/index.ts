@@ -6,3 +6,4 @@ export { Saved } from './Saved';
 export { Navigation } from './Navigation';
 export { Header } from './Header';
 export { Onboarding, hasCompletedOnboarding, completeOnboarding } from './Onboarding';
+export { DepthMeter } from './DepthMeter';
