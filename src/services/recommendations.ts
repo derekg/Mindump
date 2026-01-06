@@ -2,7 +2,42 @@ import type { WikiArticle, UserEngagement } from '../types';
 import { getRelatedArticles, searchArticles, getRandomArticles } from './wikipedia';
 
 const ENGAGEMENT_KEY = 'rabbithole_engagement';
+const PREFERENCES_KEY = 'rabbithole_preferences';
 const MAX_ENGAGEMENTS = 100;
+
+// Category to Wikipedia search term mapping
+const CATEGORY_SEARCH_TERMS: Record<string, string[]> = {
+  history: ['History', 'Historical events', 'Ancient civilization'],
+  science: ['Science', 'Scientific discovery', 'Physics'],
+  technology: ['Technology', 'Computing', 'Innovation'],
+  art: ['Art history', 'Famous paintings', 'Renaissance art'],
+  music: ['Music history', 'Famous musicians', 'Classical music'],
+  sports: ['Sports', 'Olympic games', 'Football'],
+  nature: ['Nature', 'Wildlife', 'Ecology'],
+  space: ['Space exploration', 'Astronomy', 'NASA'],
+  philosophy: ['Philosophy', 'Philosophers', 'Ethics'],
+  geography: ['Geography', 'Countries', 'World landmarks'],
+  literature: ['Literature', 'Famous authors', 'Classic novels'],
+  film: ['Cinema', 'Film history', 'Movie directors'],
+  politics: ['Politics', 'World leaders', 'Government'],
+  economics: ['Economics', 'Economy', 'Finance'],
+  medicine: ['Medicine', 'Medical discoveries', 'Health'],
+  food: ['Cuisine', 'Food history', 'Cooking'],
+};
+
+// Get user's onboarding preferences
+function getOnboardingPreferences(): string[] {
+  try {
+    const stored = localStorage.getItem(PREFERENCES_KEY);
+    if (stored) {
+      const prefs = JSON.parse(stored);
+      return prefs.categories || [];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
 
 // Get stored engagement data
 export function getEngagementHistory(): UserEngagement[] {
@@ -87,14 +122,38 @@ export function getTopInterests(count: number = 5): string[] {
 // Get personalized recommendations based on engagement
 export async function getPersonalizedRecommendations(): Promise<WikiArticle[]> {
   const history = getEngagementHistory();
-
-  // If no history, return random articles
-  if (history.length === 0) {
-    return getRandomArticles(10);
-  }
+  const onboardingPrefs = getOnboardingPreferences();
 
   const recommendations: WikiArticle[] = [];
   const seenIds = new Set<number>();
+
+  // If no history, use onboarding preferences or random
+  if (history.length === 0) {
+    if (onboardingPrefs.length > 0) {
+      // Use onboarding categories to bootstrap recommendations
+      for (const category of onboardingPrefs.slice(0, 4)) {
+        const searchTerms = CATEGORY_SEARCH_TERMS[category] || [category];
+        const randomTerm = searchTerms[Math.floor(Math.random() * searchTerms.length)];
+        const results = await searchArticles(randomTerm, 4);
+        results.forEach((article) => {
+          if (!seenIds.has(article.id)) {
+            seenIds.add(article.id);
+            recommendations.push(article);
+          }
+        });
+      }
+      // Add some random for discovery
+      const random = await getRandomArticles(3);
+      random.forEach((article) => {
+        if (!seenIds.has(article.id)) {
+          seenIds.add(article.id);
+          recommendations.push(article);
+        }
+      });
+      return shuffleArray(recommendations).slice(0, 15);
+    }
+    return getRandomArticles(10);
+  }
 
   // Get related articles from recent engaged articles
   const recentEngaged = history
@@ -115,6 +174,20 @@ export async function getPersonalizedRecommendations(): Promise<WikiArticle[]> {
   const topInterests = getTopInterests(3);
   for (const interest of topInterests) {
     const results = await searchArticles(interest, 5);
+    results.forEach((article) => {
+      if (!seenIds.has(article.id)) {
+        seenIds.add(article.id);
+        recommendations.push(article);
+      }
+    });
+  }
+
+  // Also include onboarding preferences if set
+  if (onboardingPrefs.length > 0 && recommendations.length < 10) {
+    const randomPref = onboardingPrefs[Math.floor(Math.random() * onboardingPrefs.length)];
+    const searchTerms = CATEGORY_SEARCH_TERMS[randomPref] || [randomPref];
+    const randomTerm = searchTerms[Math.floor(Math.random() * searchTerms.length)];
+    const results = await searchArticles(randomTerm, 3);
     results.forEach((article) => {
       if (!seenIds.has(article.id)) {
         seenIds.add(article.id);
