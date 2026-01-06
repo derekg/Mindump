@@ -1,0 +1,125 @@
+.saved {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.saved-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 8px;
+  position: sticky;
+  top: 60px;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.saved-title-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saved-icon {
+  color: var(--accent);
+}
+
+.saved-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.export-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: none;
+  background: var(--button-bg);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.export-btn:hover {
+  background: var(--button-hover);
+  color: var(--text-primary);
+}
+
+.saved-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin: 0 0 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saved-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 50vh;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.empty-icon {
+  color: var(--text-tertiary);
+  margin-bottom: 16px;
+}
+
+.saved-empty h3 {
+  font-size: 1.25rem;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.saved-empty p {
+  max-width: 280px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.saved-content {
+  padding-bottom: 100px;
+}
+
+.saved-item {
+  position: relative;
+}
+
+.remove-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s ease;
+  z-index: 5;
+}
+
+.saved-item:hover .remove-btn {
+  opacity: 1;
+}
+
+.remove-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
