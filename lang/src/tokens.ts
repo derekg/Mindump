@@ -28,13 +28,16 @@ export enum TokenType {
   NOT = 'NOT',
 
   // Type keywords
+  I8 = 'I8',
   I32 = 'I32',
   I64 = 'I64',
+  U8 = 'U8',
   F32 = 'F32',
   F64 = 'F64',
   BOOL = 'BOOL',
   VOID = 'VOID',
   STR = 'STR',
+  NULL = 'NULL',
 
   // Operators
   PLUS = 'PLUS',           // +
@@ -60,6 +63,10 @@ export enum TokenType {
   RPAREN = 'RPAREN',       // )
   LBRACE = 'LBRACE',       // {
   RBRACE = 'RBRACE',       // }
+  LBRACKET = 'LBRACKET',   // [
+  RBRACKET = 'RBRACKET',   // ]
+  AMP = 'AMP',             // & (address-of)
+  CARET = 'CARET',         // ^ (dereference)
 
   // Special
   NEWLINE = 'NEWLINE',
@@ -90,8 +97,11 @@ export const KEYWORDS: Record<string, TokenType> = {
   'not': TokenType.NOT,
   'true': TokenType.TRUE,
   'false': TokenType.FALSE,
+  'null': TokenType.NULL,
+  'i8': TokenType.I8,
   'i32': TokenType.I32,
   'i64': TokenType.I64,
+  'u8': TokenType.U8,
   'f32': TokenType.F32,
   'f64': TokenType.F64,
   'bool': TokenType.BOOL,

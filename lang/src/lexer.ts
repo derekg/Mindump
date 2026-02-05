@@ -74,6 +74,10 @@ export class Lexer {
       case ')': this.addToken(TokenType.RPAREN, ')'); break;
       case '{': this.addToken(TokenType.LBRACE, '{'); break;
       case '}': this.addToken(TokenType.RBRACE, '}'); break;
+      case '[': this.addToken(TokenType.LBRACKET, '['); break;
+      case ']': this.addToken(TokenType.RBRACKET, ']'); break;
+      case '&': this.addToken(TokenType.AMP, '&'); break;
+      case '^': this.addToken(TokenType.CARET, '^'); break;
 
       // Two character tokens
       case '-':
@@ -129,6 +133,11 @@ export class Lexer {
         this.string();
         break;
 
+      // Character literals
+      case "'":
+        this.character();
+        break;
+
       default:
         if (this.isDigit(c)) {
           this.number(c);
@@ -172,6 +181,35 @@ export class Lexer {
 
     this.advance(); // closing "
     this.addToken(TokenType.STRING, value);
+  }
+
+  private character(): void {
+    let value: string;
+
+    if (this.peek() === '\\') {
+      this.advance();
+      const escaped = this.advance();
+      switch (escaped) {
+        case 'n': value = '\n'; break;
+        case 't': value = '\t'; break;
+        case 'r': value = '\r'; break;
+        case '\\': value = '\\'; break;
+        case "'": value = "'"; break;
+        case '0': value = '\0'; break;
+        default:
+          throw new LexerError(`Invalid escape sequence '\\${escaped}'`, this.line, this.column - 2);
+      }
+    } else {
+      value = this.advance();
+    }
+
+    if (this.peek() !== "'") {
+      throw new LexerError('Unterminated character literal', this.line, this.column);
+    }
+    this.advance(); // closing '
+
+    // Store as integer (character code)
+    this.addToken(TokenType.INTEGER, value.charCodeAt(0).toString());
   }
 
   private number(firstChar: string): void {

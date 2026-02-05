@@ -1,15 +1,18 @@
 // Abstract Syntax Tree for ALLM language
 
 export type Type =
+  | { kind: 'i8' }
   | { kind: 'i32' }
   | { kind: 'i64' }
+  | { kind: 'u8' }
   | { kind: 'f32' }
   | { kind: 'f64' }
   | { kind: 'bool' }
   | { kind: 'void' }
   | { kind: 'str' }
   | { kind: 'named'; name: string }
-  | { kind: 'ptr'; inner: Type };
+  | { kind: 'ptr'; inner: Type }
+  | { kind: 'array'; element: Type; size: number | null };
 
 export interface SourceLocation {
   line: number;
@@ -22,13 +25,18 @@ export type Expr =
   | FloatLiteral
   | StringLiteral
   | BoolLiteral
+  | NullLiteral
   | Identifier
   | BinaryExpr
   | UnaryExpr
   | CallExpr
   | MemberExpr
   | StructLiteral
-  | IndexExpr;
+  | IndexExpr
+  | AddressOfExpr
+  | DerefExpr
+  | CastExpr
+  | SizeOfExpr;
 
 export interface IntegerLiteral {
   kind: 'integer';
@@ -105,6 +113,36 @@ export interface IndexExpr {
   kind: 'index';
   object: Expr;
   index: Expr;
+  loc: SourceLocation;
+}
+
+export interface NullLiteral {
+  kind: 'null';
+  loc: SourceLocation;
+}
+
+export interface AddressOfExpr {
+  kind: 'address_of';
+  operand: Expr;
+  loc: SourceLocation;
+}
+
+export interface DerefExpr {
+  kind: 'deref';
+  operand: Expr;
+  loc: SourceLocation;
+}
+
+export interface CastExpr {
+  kind: 'cast';
+  expr: Expr;
+  targetType: Type;
+  loc: SourceLocation;
+}
+
+export interface SizeOfExpr {
+  kind: 'sizeof';
+  targetType: Type;
   loc: SourceLocation;
 }
 
@@ -216,8 +254,10 @@ export interface Program {
 // Helper functions
 export function typeToString(type: Type): string {
   switch (type.kind) {
+    case 'i8': return 'i8';
     case 'i32': return 'i32';
     case 'i64': return 'i64';
+    case 'u8': return 'u8';
     case 'f32': return 'f32';
     case 'f64': return 'f64';
     case 'bool': return 'bool';
@@ -225,6 +265,11 @@ export function typeToString(type: Type): string {
     case 'str': return 'str';
     case 'named': return type.name;
     case 'ptr': return `*${typeToString(type.inner)}`;
+    case 'array':
+      if (type.size !== null) {
+        return `[${type.size}]${typeToString(type.element)}`;
+      }
+      return `[]${typeToString(type.element)}`;
   }
 }
 
@@ -232,5 +277,8 @@ export function typesEqual(a: Type, b: Type): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'named' && b.kind === 'named') return a.name === b.name;
   if (a.kind === 'ptr' && b.kind === 'ptr') return typesEqual(a.inner, b.inner);
+  if (a.kind === 'array' && b.kind === 'array') {
+    return a.size === b.size && typesEqual(a.element, b.element);
+  }
   return true;
 }

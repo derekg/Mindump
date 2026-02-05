@@ -1,0 +1,27 @@
+# Test arrays and pointers
+# Memory management via libc
+
+extern fn malloc(size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+
+fn main() -> i32
+    # Allocate array of 5 i32s (20 bytes)
+    let mut buf: *i8 = malloc(20)
+    let mut arr: *i32 = buf
+
+    # Fill array with squares
+    for i in 0..5
+        arr[i] = i * i
+    end
+
+    # Sum the array: 0+1+4+9+16 = 30
+    let mut sum: i32 = 0
+    for i in 0..5
+        sum = sum + arr[i]
+    end
+
+    # Free memory
+    free(buf)
+
+    return sum
+end

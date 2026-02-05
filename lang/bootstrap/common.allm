@@ -1,0 +1,55 @@
+# Common definitions for ALLM bootstrap compiler
+# This file contains libc extern declarations
+
+# Memory management
+extern fn malloc(size: i64) -> *i8
+extern fn realloc(ptr: *i8, size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+extern fn memset(ptr: *i8, c: i32, n: i64) -> *i8
+
+# String functions
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+extern fn strcpy(dst: *i8, src: *i8) -> *i8
+extern fn strcat(dst: *i8, src: *i8) -> *i8
+
+# File I/O
+extern fn fopen(filename: *i8, mode: *i8) -> *i8
+extern fn fclose(fp: *i8) -> i32
+extern fn fread(ptr: *i8, size: i64, n: i64, fp: *i8) -> i64
+extern fn fwrite(ptr: *i8, size: i64, n: i64, fp: *i8) -> i64
+extern fn fgetc(fp: *i8) -> i32
+extern fn fputc(c: i32, fp: *i8) -> i32
+extern fn fputs(s: *i8, fp: *i8) -> i32
+extern fn fgets(s: *i8, n: i32, fp: *i8) -> *i8
+extern fn fseek(fp: *i8, offset: i64, whence: i32) -> i32
+extern fn ftell(fp: *i8) -> i64
+extern fn feof(fp: *i8) -> i32
+
+# Standard I/O
+extern fn printf(fmt: *i8) -> i32
+extern fn puts(s: *i8) -> i32
+extern fn putchar(c: i32) -> i32
+extern fn getchar() -> i32
+
+# Process
+extern fn exit(code: i32) -> void
+
+# Character classification
+fn is_digit(c: i32) -> bool
+    return c >= 48 and c <= 57
+end
+
+fn is_alpha(c: i32) -> bool
+    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+end
+
+fn is_alnum(c: i32) -> bool
+    return is_alpha(c) or is_digit(c)
+end
+
+fn is_space(c: i32) -> bool
+    return c == 32 or c == 9 or c == 10 or c == 13
+end

@@ -1,0 +1,668 @@
+# ALLM Bootstrap Compiler - Lexer
+# This lexer tokenizes ALLM source code
+
+# Token types (as integers for simplicity)
+# 0 = EOF
+# 1 = INTEGER
+# 2 = FLOAT
+# 3 = STRING
+# 4 = IDENT
+# 5-30 = Keywords (fn, let, mut, if, else, while, for, in, return, end, struct, and, or, not, true, false, null, extern)
+# 31-50 = Type keywords (i8, i32, i64, u8, f32, f64, bool, void, str)
+# 51-70 = Operators (+, -, *, /, %, ==, !=, <, >, <=, >=, =, ->, .., &, ^)
+# 71-80 = Punctuation (:, ,, ., (, ), {, }, [, ])
+
+# Memory management
+extern fn malloc(size: i64) -> *i8
+extern fn realloc(ptr: *i8, size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+
+# String functions
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+
+# I/O
+extern fn puts(s: *i8) -> i32
+extern fn putchar(c: i32) -> i32
+extern fn printf(fmt: *i8) -> i32
+
+# Token type constants
+fn TOK_EOF() -> i32
+    return 0
+end
+
+fn TOK_INTEGER() -> i32
+    return 1
+end
+
+fn TOK_STRING() -> i32
+    return 3
+end
+
+fn TOK_IDENT() -> i32
+    return 4
+end
+
+fn TOK_FN() -> i32
+    return 5
+end
+
+fn TOK_LET() -> i32
+    return 6
+end
+
+fn TOK_MUT() -> i32
+    return 7
+end
+
+fn TOK_IF() -> i32
+    return 8
+end
+
+fn TOK_ELSE() -> i32
+    return 9
+end
+
+fn TOK_WHILE() -> i32
+    return 10
+end
+
+fn TOK_FOR() -> i32
+    return 11
+end
+
+fn TOK_IN() -> i32
+    return 12
+end
+
+fn TOK_RETURN() -> i32
+    return 13
+end
+
+fn TOK_END() -> i32
+    return 14
+end
+
+fn TOK_STRUCT() -> i32
+    return 15
+end
+
+fn TOK_AND() -> i32
+    return 16
+end
+
+fn TOK_OR() -> i32
+    return 17
+end
+
+fn TOK_NOT() -> i32
+    return 18
+end
+
+fn TOK_TRUE() -> i32
+    return 19
+end
+
+fn TOK_FALSE() -> i32
+    return 20
+end
+
+fn TOK_NULL() -> i32
+    return 21
+end
+
+fn TOK_EXTERN() -> i32
+    return 22
+end
+
+fn TOK_I8() -> i32
+    return 31
+end
+
+fn TOK_I32() -> i32
+    return 32
+end
+
+fn TOK_I64() -> i32
+    return 33
+end
+
+fn TOK_U8() -> i32
+    return 34
+end
+
+fn TOK_F32() -> i32
+    return 35
+end
+
+fn TOK_F64() -> i32
+    return 36
+end
+
+fn TOK_BOOL() -> i32
+    return 37
+end
+
+fn TOK_VOID() -> i32
+    return 38
+end
+
+fn TOK_STR() -> i32
+    return 39
+end
+
+fn TOK_PLUS() -> i32
+    return 51
+end
+
+fn TOK_MINUS() -> i32
+    return 52
+end
+
+fn TOK_STAR() -> i32
+    return 53
+end
+
+fn TOK_SLASH() -> i32
+    return 54
+end
+
+fn TOK_PERCENT() -> i32
+    return 55
+end
+
+fn TOK_EQ() -> i32
+    return 56
+end
+
+fn TOK_NE() -> i32
+    return 57
+end
+
+fn TOK_LT() -> i32
+    return 58
+end
+
+fn TOK_GT() -> i32
+    return 59
+end
+
+fn TOK_LE() -> i32
+    return 60
+end
+
+fn TOK_GE() -> i32
+    return 61
+end
+
+fn TOK_ASSIGN() -> i32
+    return 62
+end
+
+fn TOK_ARROW() -> i32
+    return 63
+end
+
+fn TOK_DOTDOT() -> i32
+    return 64
+end
+
+fn TOK_AMP() -> i32
+    return 65
+end
+
+fn TOK_CARET() -> i32
+    return 66
+end
+
+fn TOK_COLON() -> i32
+    return 71
+end
+
+fn TOK_COMMA() -> i32
+    return 72
+end
+
+fn TOK_DOT() -> i32
+    return 73
+end
+
+fn TOK_LPAREN() -> i32
+    return 74
+end
+
+fn TOK_RPAREN() -> i32
+    return 75
+end
+
+fn TOK_LBRACE() -> i32
+    return 76
+end
+
+fn TOK_RBRACE() -> i32
+    return 77
+end
+
+fn TOK_LBRACKET() -> i32
+    return 78
+end
+
+fn TOK_RBRACKET() -> i32
+    return 79
+end
+
+# Character classification
+fn is_digit(c: i32) -> bool
+    return c >= 48 and c <= 57
+end
+
+fn is_alpha(c: i32) -> bool
+    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+end
+
+fn is_alnum(c: i32) -> bool
+    return is_alpha(c) or is_digit(c)
+end
+
+fn is_space(c: i32) -> bool
+    return c == 32 or c == 9 or c == 10 or c == 13
+end
+
+# Token structure (simple: type, value pointer, value length, line, column)
+struct Token
+    type: i32
+    value: *i8
+    len: i32
+    line: i32
+    col: i32
+end
+
+# Lexer structure
+struct Lexer
+    source: *i8
+    len: i64
+    pos: i64
+    line: i32
+    col: i32
+end
+
+fn lexer_new(source: *i8) -> Lexer
+    let lex: Lexer = Lexer {
+        source: source,
+        len: strlen(source),
+        pos: 0,
+        line: 1,
+        col: 1
+    }
+    return lex
+end
+
+fn lexer_peek(lex: *Lexer) -> i32
+    if (^lex).pos >= (^lex).len
+        return 0
+    end
+    let s: *i8 = (^lex).source
+    let p: i64 = (^lex).pos
+    let c: i32 = s[p]
+    return c
+end
+
+fn lexer_advance(lex: *Lexer) -> i32
+    let c: i32 = lexer_peek(lex)
+    if c != 0
+        (^lex).pos = (^lex).pos + 1
+        if c == 10
+            (^lex).line = (^lex).line + 1
+            (^lex).col = 1
+        else
+            (^lex).col = (^lex).col + 1
+        end
+    end
+    return c
+end
+
+fn lexer_skip_whitespace(lex: *Lexer) -> void
+    while is_space(lexer_peek(lex))
+        lexer_advance(lex)
+    end
+end
+
+fn lexer_skip_comment(lex: *Lexer) -> void
+    if lexer_peek(lex) == 35
+        while lexer_peek(lex) != 10 and lexer_peek(lex) != 0
+            lexer_advance(lex)
+        end
+    end
+end
+
+fn lexer_skip_whitespace_and_comments(lex: *Lexer) -> void
+    let mut done: bool = false
+    while not done
+        lexer_skip_whitespace(lex)
+        if lexer_peek(lex) == 35
+            lexer_skip_comment(lex)
+        else
+            done = true
+        end
+    end
+end
+
+fn make_token(type: i32, value: *i8, len: i32, line: i32, col: i32) -> Token
+    let tok: Token = Token {
+        type: type,
+        value: value,
+        len: len,
+        line: line,
+        col: col
+    }
+    return tok
+end
+
+fn check_keyword(s: *i8, len: i32) -> i32
+    # Check for keywords by comparing strings
+    if len == 2
+        if strncmp(s, "fn", 2) == 0
+            return TOK_FN()
+        end
+        if strncmp(s, "if", 2) == 0
+            return TOK_IF()
+        end
+        if strncmp(s, "in", 2) == 0
+            return TOK_IN()
+        end
+        if strncmp(s, "or", 2) == 0
+            return TOK_OR()
+        end
+        if strncmp(s, "i8", 2) == 0
+            return TOK_I8()
+        end
+        if strncmp(s, "u8", 2) == 0
+            return TOK_U8()
+        end
+    end
+    if len == 3
+        if strncmp(s, "let", 3) == 0
+            return TOK_LET()
+        end
+        if strncmp(s, "mut", 3) == 0
+            return TOK_MUT()
+        end
+        if strncmp(s, "for", 3) == 0
+            return TOK_FOR()
+        end
+        if strncmp(s, "end", 3) == 0
+            return TOK_END()
+        end
+        if strncmp(s, "and", 3) == 0
+            return TOK_AND()
+        end
+        if strncmp(s, "not", 3) == 0
+            return TOK_NOT()
+        end
+        if strncmp(s, "i32", 3) == 0
+            return TOK_I32()
+        end
+        if strncmp(s, "i64", 3) == 0
+            return TOK_I64()
+        end
+        if strncmp(s, "f32", 3) == 0
+            return TOK_F32()
+        end
+        if strncmp(s, "f64", 3) == 0
+            return TOK_F64()
+        end
+        if strncmp(s, "str", 3) == 0
+            return TOK_STR()
+        end
+    end
+    if len == 4
+        if strncmp(s, "else", 4) == 0
+            return TOK_ELSE()
+        end
+        if strncmp(s, "true", 4) == 0
+            return TOK_TRUE()
+        end
+        if strncmp(s, "null", 4) == 0
+            return TOK_NULL()
+        end
+        if strncmp(s, "bool", 4) == 0
+            return TOK_BOOL()
+        end
+        if strncmp(s, "void", 4) == 0
+            return TOK_VOID()
+        end
+    end
+    if len == 5
+        if strncmp(s, "while", 5) == 0
+            return TOK_WHILE()
+        end
+        if strncmp(s, "false", 5) == 0
+            return TOK_FALSE()
+        end
+    end
+    if len == 6
+        if strncmp(s, "return", 6) == 0
+            return TOK_RETURN()
+        end
+        if strncmp(s, "struct", 6) == 0
+            return TOK_STRUCT()
+        end
+        if strncmp(s, "extern", 6) == 0
+            return TOK_EXTERN()
+        end
+    end
+    return TOK_IDENT()
+end
+
+fn lexer_next(lex: *Lexer) -> Token
+    lexer_skip_whitespace_and_comments(lex)
+
+    let line: i32 = (^lex).line
+    let col: i32 = (^lex).col
+    let c: i32 = lexer_peek(lex)
+
+    if c == 0
+        return make_token(TOK_EOF(), null, 0, line, col)
+    end
+
+    # Single character tokens
+    if c == 43
+        lexer_advance(lex)
+        return make_token(TOK_PLUS(), null, 1, line, col)
+    end
+    if c == 42
+        lexer_advance(lex)
+        return make_token(TOK_STAR(), null, 1, line, col)
+    end
+    if c == 47
+        lexer_advance(lex)
+        return make_token(TOK_SLASH(), null, 1, line, col)
+    end
+    if c == 37
+        lexer_advance(lex)
+        return make_token(TOK_PERCENT(), null, 1, line, col)
+    end
+    if c == 58
+        lexer_advance(lex)
+        return make_token(TOK_COLON(), null, 1, line, col)
+    end
+    if c == 44
+        lexer_advance(lex)
+        return make_token(TOK_COMMA(), null, 1, line, col)
+    end
+    if c == 40
+        lexer_advance(lex)
+        return make_token(TOK_LPAREN(), null, 1, line, col)
+    end
+    if c == 41
+        lexer_advance(lex)
+        return make_token(TOK_RPAREN(), null, 1, line, col)
+    end
+    if c == 123
+        lexer_advance(lex)
+        return make_token(TOK_LBRACE(), null, 1, line, col)
+    end
+    if c == 125
+        lexer_advance(lex)
+        return make_token(TOK_RBRACE(), null, 1, line, col)
+    end
+    if c == 91
+        lexer_advance(lex)
+        return make_token(TOK_LBRACKET(), null, 1, line, col)
+    end
+    if c == 93
+        lexer_advance(lex)
+        return make_token(TOK_RBRACKET(), null, 1, line, col)
+    end
+    if c == 38
+        lexer_advance(lex)
+        return make_token(TOK_AMP(), null, 1, line, col)
+    end
+    if c == 94
+        lexer_advance(lex)
+        return make_token(TOK_CARET(), null, 1, line, col)
+    end
+
+    # Two character tokens
+    if c == 45
+        lexer_advance(lex)
+        if lexer_peek(lex) == 62
+            lexer_advance(lex)
+            return make_token(TOK_ARROW(), null, 2, line, col)
+        end
+        return make_token(TOK_MINUS(), null, 1, line, col)
+    end
+
+    if c == 46
+        lexer_advance(lex)
+        if lexer_peek(lex) == 46
+            lexer_advance(lex)
+            return make_token(TOK_DOTDOT(), null, 2, line, col)
+        end
+        return make_token(TOK_DOT(), null, 1, line, col)
+    end
+
+    if c == 61
+        lexer_advance(lex)
+        if lexer_peek(lex) == 61
+            lexer_advance(lex)
+            return make_token(TOK_EQ(), null, 2, line, col)
+        end
+        return make_token(TOK_ASSIGN(), null, 1, line, col)
+    end
+
+    if c == 33
+        lexer_advance(lex)
+        if lexer_peek(lex) == 61
+            lexer_advance(lex)
+            return make_token(TOK_NE(), null, 2, line, col)
+        end
+        # Error: unexpected !
+        return make_token(0, null, 0, line, col)
+    end
+
+    if c == 60
+        lexer_advance(lex)
+        if lexer_peek(lex) == 61
+            lexer_advance(lex)
+            return make_token(TOK_LE(), null, 2, line, col)
+        end
+        return make_token(TOK_LT(), null, 1, line, col)
+    end
+
+    if c == 62
+        lexer_advance(lex)
+        if lexer_peek(lex) == 61
+            lexer_advance(lex)
+            return make_token(TOK_GE(), null, 2, line, col)
+        end
+        return make_token(TOK_GT(), null, 1, line, col)
+    end
+
+    # String literal
+    if c == 34
+        lexer_advance(lex)
+        let start: i64 = (^lex).pos
+        while lexer_peek(lex) != 34 and lexer_peek(lex) != 0
+            lexer_advance(lex)
+        end
+        let slen: i32 = (^lex).pos - start
+        let s: *i8 = (^lex).source
+        let value: *i8 = s + start
+        lexer_advance(lex)
+        return make_token(TOK_STRING(), value, slen, line, col)
+    end
+
+    # Numbers
+    if is_digit(c)
+        let start: i64 = (^lex).pos
+        while is_digit(lexer_peek(lex))
+            lexer_advance(lex)
+        end
+        let nlen: i32 = (^lex).pos - start
+        let s: *i8 = (^lex).source
+        let value: *i8 = s + start
+        return make_token(TOK_INTEGER(), value, nlen, line, col)
+    end
+
+    # Identifiers and keywords
+    if is_alpha(c)
+        let start: i64 = (^lex).pos
+        while is_alnum(lexer_peek(lex))
+            lexer_advance(lex)
+        end
+        let ilen: i32 = (^lex).pos - start
+        let s: *i8 = (^lex).source
+        let value: *i8 = s + start
+        let type: i32 = check_keyword(value, ilen)
+        return make_token(type, value, ilen, line, col)
+    end
+
+    # Unknown character
+    lexer_advance(lex)
+    return make_token(0, null, 0, line, col)
+end
+
+# Test the lexer
+fn main() -> i32
+    let source: *i8 = "fn main() -> i32\n    let x: i32 = 42\n    return x\nend"
+    let mut lex: Lexer = lexer_new(source)
+
+    let mut tok: Token = lexer_next(&lex)
+    while tok.type != TOK_EOF()
+        # Print token type
+        if tok.type == TOK_FN()
+            puts("FN")
+        else if tok.type == TOK_IDENT()
+            puts("IDENT")
+        else if tok.type == TOK_LPAREN()
+            puts("LPAREN")
+        else if tok.type == TOK_RPAREN()
+            puts("RPAREN")
+        else if tok.type == TOK_ARROW()
+            puts("ARROW")
+        else if tok.type == TOK_I32()
+            puts("I32")
+        else if tok.type == TOK_LET()
+            puts("LET")
+        else if tok.type == TOK_COLON()
+            puts("COLON")
+        else if tok.type == TOK_ASSIGN()
+            puts("ASSIGN")
+        else if tok.type == TOK_INTEGER()
+            puts("INTEGER")
+        else if tok.type == TOK_RETURN()
+            puts("RETURN")
+        else if tok.type == TOK_END()
+            puts("END")
+        else
+            puts("OTHER")
+        end
+        tok = lexer_next(&lex)
+    end
+
+    puts("Done!")
+    return 0
+end

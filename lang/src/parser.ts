@@ -114,17 +114,31 @@ export class Parser {
   }
 
   private parseType(): AST.Type {
+    if (this.match(TokenType.I8)) return { kind: 'i8' };
     if (this.match(TokenType.I32)) return { kind: 'i32' };
     if (this.match(TokenType.I64)) return { kind: 'i64' };
+    if (this.match(TokenType.U8)) return { kind: 'u8' };
     if (this.match(TokenType.F32)) return { kind: 'f32' };
     if (this.match(TokenType.F64)) return { kind: 'f64' };
     if (this.match(TokenType.BOOL)) return { kind: 'bool' };
     if (this.match(TokenType.VOID)) return { kind: 'void' };
     if (this.match(TokenType.STR)) return { kind: 'str' };
 
+    // Pointer type: *T
     if (this.match(TokenType.STAR)) {
       const inner = this.parseType();
       return { kind: 'ptr', inner };
+    }
+
+    // Array type: [N]T or []T
+    if (this.match(TokenType.LBRACKET)) {
+      let size: number | null = null;
+      if (this.check(TokenType.INTEGER)) {
+        size = parseInt(this.advance().value, 10);
+      }
+      this.expect(TokenType.RBRACKET, 'Expected "]" in array type');
+      const element = this.parseType();
+      return { kind: 'array', element, size };
     }
 
     if (this.check(TokenType.IDENT)) {
@@ -371,6 +385,18 @@ export class Parser {
       return { kind: 'unary', op: '-', operand, loc };
     }
 
+    // Address-of: &expr
+    if (this.match(TokenType.AMP)) {
+      const operand = this.unaryExpr();
+      return { kind: 'address_of', operand, loc };
+    }
+
+    // Dereference: ^expr
+    if (this.match(TokenType.CARET)) {
+      const operand = this.unaryExpr();
+      return { kind: 'deref', operand, loc };
+    }
+
     return this.postfixExpr();
   }
 
@@ -378,10 +404,14 @@ export class Parser {
     let expr = this.primaryExpr();
 
     while (true) {
+      const loc = this.loc();
       if (this.match(TokenType.DOT)) {
-        const loc = this.loc();
         const field = this.expect(TokenType.IDENT, 'Expected field name after "."').value;
         expr = { kind: 'member', object: expr, field, loc };
+      } else if (this.match(TokenType.LBRACKET)) {
+        const index = this.expression();
+        this.expect(TokenType.RBRACKET, 'Expected "]" after index');
+        expr = { kind: 'index', object: expr, index, loc };
       } else {
         break;
       }
@@ -415,6 +445,10 @@ export class Parser {
 
     if (this.match(TokenType.FALSE)) {
       return { kind: 'bool', value: false, loc };
+    }
+
+    if (this.match(TokenType.NULL)) {
+      return { kind: 'null', loc };
     }
 
     // Parenthesized expression

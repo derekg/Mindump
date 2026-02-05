@@ -35,6 +35,7 @@ export class CodeGenerator {
   private tempCounter: number = 0;
   private labelCounter: number = 0;
   private stringCounter: number = 0;
+  private varCounter: number = 0;
   private strings: Map<string, string> = new Map();
   private functions: Map<string, FunctionInfo> = new Map();
   private structs: Map<string, StructInfo> = new Map();
@@ -113,6 +114,7 @@ export class CodeGenerator {
     this.currentFunction = fn.name;
     this.variables.clear();
     this.tempCounter = 0;
+    this.varCounter = 0;
 
     const params = fn.params.map(p => `${this.typeToLLVM(p.type)} %${p.name}.arg`).join(', ');
     const retType = this.typeToLLVM(fn.returnType);
@@ -123,7 +125,8 @@ export class CodeGenerator {
     // Allocate space for parameters and copy them
     for (const param of fn.params) {
       const llvmType = this.typeToLLVM(param.type);
-      const ptrName = `%${param.name}`;
+      const uniqueId = this.varCounter++;
+      const ptrName = `%${param.name}.${uniqueId}`;
       this.emit(`  ${ptrName} = alloca ${llvmType}`);
       this.emit(`  store ${llvmType} %${param.name}.arg, ptr ${ptrName}`);
       this.variables.set(param.name, {
@@ -184,11 +187,17 @@ export class CodeGenerator {
 
   private generateLet(stmt: AST.LetStmt): void {
     const llvmType = this.typeToLLVM(stmt.type);
-    const ptrName = `%${stmt.name}`;
+    const uniqueId = this.varCounter++;
+    const ptrName = `%${stmt.name}.${uniqueId}`;
 
     this.emit(`  ${ptrName} = alloca ${llvmType}`);
 
-    const initValue = this.generateExpr(stmt.init);
+    let initValue = this.generateExpr(stmt.init);
+    const initType = this.inferType(stmt.init);
+
+    // Handle implicit integer widening
+    initValue = this.convertValue(initValue, initType, stmt.type);
+
     this.emit(`  store ${llvmType} ${initValue}, ptr ${ptrName}`);
 
     this.variables.set(stmt.name, {
@@ -198,20 +207,100 @@ export class CodeGenerator {
     });
   }
 
+  private convertValue(value: string, fromType: AST.Type, toType: AST.Type): string {
+    const fromLLVM = this.typeToLLVM(fromType);
+    const toLLVM = this.typeToLLVM(toType);
+
+    if (fromLLVM === toLLVM) return value;
+
+    // Integer widening
+    const fromBits = this.getTypeBits(fromType);
+    const toBits = this.getTypeBits(toType);
+
+    if (this.isIntegerType(fromType) && this.isIntegerType(toType)) {
+      if (fromBits < toBits) {
+        const result = this.nextTemp();
+        if (fromType.kind === 'u8') {
+          this.emit(`  ${result} = zext ${fromLLVM} ${value} to ${toLLVM}`);
+        } else {
+          this.emit(`  ${result} = sext ${fromLLVM} ${value} to ${toLLVM}`);
+        }
+        return result;
+      } else if (fromBits > toBits) {
+        const result = this.nextTemp();
+        this.emit(`  ${result} = trunc ${fromLLVM} ${value} to ${toLLVM}`);
+        return result;
+      }
+    }
+
+    return value;
+  }
+
+  private isIntegerType(type: AST.Type): boolean {
+    return type.kind === 'i8' || type.kind === 'i32' || type.kind === 'i64' || type.kind === 'u8';
+  }
+
   private generateAssign(stmt: AST.AssignStmt): void {
     if (stmt.target.kind === 'identifier') {
       const varInfo = this.variables.get(stmt.target.name);
       if (!varInfo) {
         throw new CodeGenError(`Undefined variable '${stmt.target.name}'`, stmt.loc.line, stmt.loc.column);
       }
-      const value = this.generateExpr(stmt.value);
+      let value = this.generateExpr(stmt.value);
+      const valueType = this.inferType(stmt.value);
+      value = this.convertValue(value, valueType, varInfo.type);
       const llvmType = this.typeToLLVM(varInfo.type);
       this.emit(`  store ${llvmType} ${value}, ptr ${varInfo.llvmName}`);
     } else if (stmt.target.kind === 'member') {
       this.generateMemberAssign(stmt.target, stmt.value);
+    } else if (stmt.target.kind === 'index') {
+      this.generateIndexAssign(stmt.target, stmt.value);
+    } else if (stmt.target.kind === 'deref') {
+      this.generateDerefAssign(stmt.target, stmt.value);
     } else {
       throw new CodeGenError('Invalid assignment target', stmt.loc.line, stmt.loc.column);
     }
+  }
+
+  private generateIndexAssign(target: AST.IndexExpr, value: AST.Expr): void {
+    const objType = this.inferType(target.object);
+    const indexType = this.inferType(target.index);
+    let index = this.generateExpr(target.index);
+    const val = this.generateExpr(value);
+
+    // Convert index to i64 if needed
+    if (indexType.kind === 'i32') {
+      const extended = this.nextTemp();
+      this.emit(`  ${extended} = sext i32 ${index} to i64`);
+      index = extended;
+    }
+
+    if (objType.kind === 'array') {
+      const objPtr = this.generateExprPtr(target.object);
+      const elemType = this.typeToLLVM(objType.element);
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds ${this.typeToLLVM(objType)}, ptr ${objPtr}, i64 0, i64 ${index}`);
+      this.emit(`  store ${elemType} ${val}, ptr ${gepResult}`);
+    } else if (objType.kind === 'ptr') {
+      const objVal = this.generateExpr(target.object);
+      const elemType = this.typeToLLVM(objType.inner);
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds ${elemType}, ptr ${objVal}, i64 ${index}`);
+      this.emit(`  store ${elemType} ${val}, ptr ${gepResult}`);
+    } else {
+      throw new CodeGenError('Cannot index assign to this type', target.loc.line, target.loc.column);
+    }
+  }
+
+  private generateDerefAssign(target: AST.DerefExpr, value: AST.Expr): void {
+    const ptr = this.generateExpr(target.operand);
+    const ptrType = this.inferType(target.operand);
+    if (ptrType.kind !== 'ptr') {
+      throw new CodeGenError('Cannot dereference non-pointer type', target.loc.line, target.loc.column);
+    }
+    const val = this.generateExpr(value);
+    const elemType = this.typeToLLVM(ptrType.inner);
+    this.emit(`  store ${elemType} ${val}, ptr ${ptr}`);
   }
 
   private generateMemberAssign(member: AST.MemberExpr, value: AST.Expr): void {
@@ -332,7 +421,8 @@ export class CodeGenerator {
     //   i = i + 1
     // end
 
-    const ptrName = `%${stmt.variable}`;
+    const uniqueId = this.varCounter++;
+    const ptrName = `%${stmt.variable}.${uniqueId}`;
     this.emit(`  ${ptrName} = alloca i32`);
 
     const startValue = this.generateExpr(stmt.start);
@@ -424,7 +514,138 @@ export class CodeGenerator {
         return this.generateStructLiteral(expr);
 
       case 'index':
-        throw new CodeGenError('Index expressions not yet implemented', expr.loc.line, expr.loc.column);
+        return this.generateIndex(expr);
+
+      case 'null':
+        return 'null';
+
+      case 'address_of':
+        return this.generateAddressOf(expr);
+
+      case 'deref':
+        return this.generateDeref(expr);
+
+      case 'cast':
+        return this.generateCast(expr);
+
+      case 'sizeof':
+        return this.generateSizeof(expr);
+    }
+  }
+
+  private generateIndex(expr: AST.IndexExpr): string {
+    const objType = this.inferType(expr.object);
+    const indexType = this.inferType(expr.index);
+    let index = this.generateExpr(expr.index);
+
+    // Convert index to i64 if needed
+    if (indexType.kind === 'i32') {
+      const extended = this.nextTemp();
+      this.emit(`  ${extended} = sext i32 ${index} to i64`);
+      index = extended;
+    }
+
+    if (objType.kind === 'array') {
+      const objPtr = this.generateExprPtr(expr.object);
+      const elemType = this.typeToLLVM(objType.element);
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds ${this.typeToLLVM(objType)}, ptr ${objPtr}, i64 0, i64 ${index}`);
+      const loadResult = this.nextTemp();
+      this.emit(`  ${loadResult} = load ${elemType}, ptr ${gepResult}`);
+      return loadResult;
+    } else if (objType.kind === 'ptr') {
+      const objVal = this.generateExpr(expr.object);
+      const elemType = this.typeToLLVM(objType.inner);
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds ${elemType}, ptr ${objVal}, i64 ${index}`);
+      const loadResult = this.nextTemp();
+      this.emit(`  ${loadResult} = load ${elemType}, ptr ${gepResult}`);
+      return loadResult;
+    } else if (objType.kind === 'str') {
+      // String indexing returns a byte
+      const objVal = this.generateExpr(expr.object);
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds i8, ptr ${objVal}, i64 ${index}`);
+      const loadResult = this.nextTemp();
+      this.emit(`  ${loadResult} = load i8, ptr ${gepResult}`);
+      return loadResult;
+    }
+
+    throw new CodeGenError('Cannot index into this type', expr.loc.line, expr.loc.column);
+  }
+
+  private generateAddressOf(expr: AST.AddressOfExpr): string {
+    return this.generateExprPtr(expr.operand);
+  }
+
+  private generateDeref(expr: AST.DerefExpr): string {
+    const ptr = this.generateExpr(expr.operand);
+    const ptrType = this.inferType(expr.operand);
+    if (ptrType.kind !== 'ptr') {
+      throw new CodeGenError('Cannot dereference non-pointer type', expr.loc.line, expr.loc.column);
+    }
+    const elemType = this.typeToLLVM(ptrType.inner);
+    const result = this.nextTemp();
+    this.emit(`  ${result} = load ${elemType}, ptr ${ptr}`);
+    return result;
+  }
+
+  private generateCast(expr: AST.CastExpr): string {
+    const value = this.generateExpr(expr.expr);
+    const srcType = this.inferType(expr.expr);
+    const dstType = expr.targetType;
+    const result = this.nextTemp();
+
+    const srcLLVM = this.typeToLLVM(srcType);
+    const dstLLVM = this.typeToLLVM(dstType);
+
+    // Same type - no cast needed
+    if (srcLLVM === dstLLVM) return value;
+
+    // Pointer casts - just bitcast (in opaque ptr, this is a no-op)
+    if (srcType.kind === 'ptr' || dstType.kind === 'ptr') {
+      return value; // With opaque pointers, no cast needed
+    }
+
+    // Integer to integer
+    const srcBits = this.getTypeBits(srcType);
+    const dstBits = this.getTypeBits(dstType);
+
+    if (srcBits < dstBits) {
+      // Extend
+      if (srcType.kind === 'u8') {
+        this.emit(`  ${result} = zext ${srcLLVM} ${value} to ${dstLLVM}`);
+      } else {
+        this.emit(`  ${result} = sext ${srcLLVM} ${value} to ${dstLLVM}`);
+      }
+    } else if (srcBits > dstBits) {
+      // Truncate
+      this.emit(`  ${result} = trunc ${srcLLVM} ${value} to ${dstLLVM}`);
+    } else {
+      return value;
+    }
+
+    return result;
+  }
+
+  private generateSizeof(expr: AST.SizeOfExpr): string {
+    const llvmType = this.typeToLLVM(expr.targetType);
+    const result = this.nextTemp();
+    const ptrResult = this.nextTemp();
+    // sizeof trick: getelementptr from null, then ptrtoint
+    this.emit(`  ${ptrResult} = getelementptr ${llvmType}, ptr null, i32 1`);
+    this.emit(`  ${result} = ptrtoint ptr ${ptrResult} to i64`);
+    return result;
+  }
+
+  private getTypeBits(type: AST.Type): number {
+    switch (type.kind) {
+      case 'i8': case 'u8': case 'bool': return 8;
+      case 'i32': return 32;
+      case 'i64': return 64;
+      case 'f32': return 32;
+      case 'f64': return 64;
+      default: return 64; // pointers
     }
   }
 
@@ -435,6 +656,53 @@ export class CodeGenerator {
         throw new CodeGenError(`Undefined variable '${expr.name}'`, expr.loc.line, expr.loc.column);
       }
       return varInfo.llvmName;
+    }
+    if (expr.kind === 'deref') {
+      // ^ptr is already a pointer dereference, so the address is just the ptr value
+      return this.generateExpr(expr.operand);
+    }
+    if (expr.kind === 'index') {
+      const objType = this.inferType(expr.object);
+      const indexType = this.inferType(expr.index);
+      let index = this.generateExpr(expr.index);
+
+      // Convert index to i64 if needed
+      if (indexType.kind === 'i32') {
+        const extended = this.nextTemp();
+        this.emit(`  ${extended} = sext i32 ${index} to i64`);
+        index = extended;
+      }
+
+      if (objType.kind === 'array') {
+        const objPtr = this.generateExprPtr(expr.object);
+        const gepResult = this.nextTemp();
+        this.emit(`  ${gepResult} = getelementptr inbounds ${this.typeToLLVM(objType)}, ptr ${objPtr}, i64 0, i64 ${index}`);
+        return gepResult;
+      } else if (objType.kind === 'ptr') {
+        const objVal = this.generateExpr(expr.object);
+        const elemType = this.typeToLLVM(objType.inner);
+        const gepResult = this.nextTemp();
+        this.emit(`  ${gepResult} = getelementptr inbounds ${elemType}, ptr ${objVal}, i64 ${index}`);
+        return gepResult;
+      }
+    }
+    if (expr.kind === 'member') {
+      const objPtr = this.generateExprPtr(expr.object);
+      const objType = this.inferType(expr.object);
+      if (objType.kind !== 'named') {
+        throw new CodeGenError('Cannot access member of non-struct type', expr.loc.line, expr.loc.column);
+      }
+      const structInfo = this.structs.get(objType.name);
+      if (!structInfo) {
+        throw new CodeGenError(`Unknown struct type '${objType.name}'`, expr.loc.line, expr.loc.column);
+      }
+      const fieldIndex = structInfo.fields.findIndex(f => f.name === expr.field);
+      if (fieldIndex === -1) {
+        throw new CodeGenError(`Unknown field '${expr.field}'`, expr.loc.line, expr.loc.column);
+      }
+      const gepResult = this.nextTemp();
+      this.emit(`  ${gepResult} = getelementptr inbounds %${objType.name}, ptr ${objPtr}, i32 0, i32 ${fieldIndex}`);
+      return gepResult;
     }
     throw new CodeGenError('Cannot get pointer to expression', expr.loc.line, expr.loc.column);
   }
@@ -453,18 +721,45 @@ export class CodeGenerator {
     const left = this.generateExpr(expr.left);
     const right = this.generateExpr(expr.right);
     const leftType = this.inferType(expr.left);
+    const rightType = this.inferType(expr.right);
     const result = this.nextTemp();
 
     const isFloat = leftType.kind === 'f32' || leftType.kind === 'f64';
-    const isSigned = leftType.kind === 'i32' || leftType.kind === 'i64';
+    const isSigned = leftType.kind === 'i32' || leftType.kind === 'i64' || leftType.kind === 'i8';
     const llvmType = this.typeToLLVM(leftType);
 
     switch (expr.op) {
       case '+':
-        this.emit(`  ${result} = ${isFloat ? 'fadd' : 'add'} ${llvmType} ${left}, ${right}`);
+        // Handle pointer arithmetic: ptr + int
+        if (leftType.kind === 'ptr') {
+          let offset = right;
+          if (rightType.kind === 'i32') {
+            const extended = this.nextTemp();
+            this.emit(`  ${extended} = sext i32 ${right} to i64`);
+            offset = extended;
+          }
+          const elemType = this.typeToLLVM(leftType.inner);
+          this.emit(`  ${result} = getelementptr inbounds ${elemType}, ptr ${left}, i64 ${offset}`);
+        } else {
+          this.emit(`  ${result} = ${isFloat ? 'fadd' : 'add'} ${llvmType} ${left}, ${right}`);
+        }
         break;
       case '-':
-        this.emit(`  ${result} = ${isFloat ? 'fsub' : 'sub'} ${llvmType} ${left}, ${right}`);
+        // Handle pointer arithmetic: ptr - int
+        if (leftType.kind === 'ptr' && this.isIntegerType(rightType)) {
+          let offset = right;
+          if (rightType.kind === 'i32') {
+            const extended = this.nextTemp();
+            this.emit(`  ${extended} = sext i32 ${right} to i64`);
+            offset = extended;
+          }
+          const negOffset = this.nextTemp();
+          this.emit(`  ${negOffset} = sub i64 0, ${offset}`);
+          const elemType = this.typeToLLVM(leftType.inner);
+          this.emit(`  ${result} = getelementptr inbounds ${elemType}, ptr ${left}, i64 ${negOffset}`);
+        } else {
+          this.emit(`  ${result} = ${isFloat ? 'fsub' : 'sub'} ${llvmType} ${left}, ${right}`);
+        }
         break;
       case '*':
         this.emit(`  ${result} = ${isFloat ? 'fmul' : 'mul'} ${llvmType} ${left}, ${right}`);
@@ -692,15 +987,43 @@ export class CodeGenerator {
       }
       case 'struct_literal':
         return { kind: 'named', name: expr.name };
-      case 'index':
-        throw new CodeGenError('Index type inference not implemented', expr.loc.line, expr.loc.column);
+      case 'index': {
+        const objType = this.inferType(expr.object);
+        if (objType.kind === 'array') {
+          return objType.element;
+        } else if (objType.kind === 'ptr') {
+          return objType.inner;
+        } else if (objType.kind === 'str') {
+          return { kind: 'i8' };
+        }
+        throw new CodeGenError('Cannot index into this type', expr.loc.line, expr.loc.column);
+      }
+      case 'null':
+        return { kind: 'ptr', inner: { kind: 'void' } };
+      case 'address_of': {
+        const operandType = this.inferType(expr.operand);
+        return { kind: 'ptr', inner: operandType };
+      }
+      case 'deref': {
+        const ptrType = this.inferType(expr.operand);
+        if (ptrType.kind !== 'ptr') {
+          throw new CodeGenError('Cannot dereference non-pointer type', expr.loc.line, expr.loc.column);
+        }
+        return ptrType.inner;
+      }
+      case 'cast':
+        return expr.targetType;
+      case 'sizeof':
+        return { kind: 'i64' };
     }
   }
 
   private typeToLLVM(type: AST.Type): string {
     switch (type.kind) {
+      case 'i8': return 'i8';
       case 'i32': return 'i32';
       case 'i64': return 'i64';
+      case 'u8': return 'i8';
       case 'f32': return 'float';
       case 'f64': return 'double';
       case 'bool': return 'i1';
@@ -708,6 +1031,11 @@ export class CodeGenerator {
       case 'str': return 'ptr';
       case 'named': return `%${type.name}`;
       case 'ptr': return 'ptr';
+      case 'array':
+        if (type.size !== null) {
+          return `[${type.size} x ${this.typeToLLVM(type.element)}]`;
+        }
+        return 'ptr'; // Unsized arrays decay to pointers
     }
   }
 
