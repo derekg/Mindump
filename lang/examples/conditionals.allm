@@ -1,0 +1,43 @@
+# Conditional examples in ALLM
+# Demonstrates: if/else if/else, boolean operators, comparisons
+
+fn abs(x: i32) -> i32
+    if x < 0
+        return 0 - x
+    else
+        return x
+    end
+end
+
+fn max(a: i32, b: i32) -> i32
+    if a > b
+        return a
+    end
+    return b
+end
+
+fn clamp(value: i32, min_val: i32, max_val: i32) -> i32
+    if value < min_val
+        return min_val
+    else if value > max_val
+        return max_val
+    else
+        return value
+    end
+end
+
+fn is_in_range(x: i32, lo: i32, hi: i32) -> bool
+    return x >= lo and x <= hi
+end
+
+fn main() -> i32
+    let a: i32 = abs(-5)         # 5
+    let b: i32 = max(3, 7)       # 7
+    let c: i32 = clamp(15, 0, 10) # 10
+
+    let in_range: bool = is_in_range(5, 0, 10)  # true
+    if in_range
+        return a + b + c   # 5 + 7 + 10 = 22
+    end
+    return 0
+end

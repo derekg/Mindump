@@ -1,0 +1,14 @@
+# Fibonacci sequence in ALLM
+# Demonstrates: recursion, conditionals
+
+fn fib(n: i32) -> i32
+    if n <= 1
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+
+fn main() -> i32
+    # Compute fib(10) = 55
+    return fib(10)
+end

@@ -1,0 +1,9 @@
+# Hello World in ALLM
+# This demonstrates basic external function calls
+
+extern fn puts(s: str) -> i32
+
+fn main() -> i32
+    puts("Hello, World!")
+    return 0
+end

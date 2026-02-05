@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Compiled binaries
+*.ll
+examples/factorial
+examples/fibonacci
+examples/hello
+examples/structs
+examples/loops
+examples/conditionals
+examples/prime
+examples/gcd

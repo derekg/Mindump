@@ -1,0 +1,37 @@
+# Greatest Common Divisor in ALLM
+# Demonstrates: Euclidean algorithm, while loops
+
+fn gcd(a: i32, b: i32) -> i32
+    let mut x: i32 = a
+    let mut y: i32 = b
+
+    # Make sure we work with positive numbers
+    if x < 0
+        x = 0 - x
+    end
+    if y < 0
+        y = 0 - y
+    end
+
+    while y != 0
+        let temp: i32 = y
+        y = x % y
+        x = temp
+    end
+    return x
+end
+
+fn lcm(a: i32, b: i32) -> i32
+    let g: i32 = gcd(a, b)
+    return a * b / g
+end
+
+fn main() -> i32
+    # gcd(48, 18) = 6
+    let g: i32 = gcd(48, 18)
+
+    # lcm(4, 6) = 12
+    let l: i32 = lcm(4, 6)
+
+    return g + l   # 6 + 12 = 18
+end

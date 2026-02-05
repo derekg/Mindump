@@ -1,0 +1,21 @@
+{
+  "name": "allm-compiler",
+  "version": "0.1.0",
+  "description": "ALLM (Agent Language for LLMs) compiler targeting LLVM IR",
+  "main": "dist/index.js",
+  "bin": {
+    "allmc": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "compile": "node dist/cli.js",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "keywords": ["compiler", "llvm", "agent", "language"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "@types/node": "^20.0.0"
+  }
+}

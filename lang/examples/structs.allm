@@ -1,0 +1,34 @@
+# Struct example in ALLM
+# Demonstrates: struct definition, struct literals, member access
+
+struct Point
+    x: i32
+    y: i32
+end
+
+fn make_point(x: i32, y: i32) -> Point
+    let p: Point = Point { x: x, y: y }
+    return p
+end
+
+fn manhattan_distance(p: Point) -> i32
+    let mut dx: i32 = p.x
+    let mut dy: i32 = p.y
+
+    if dx < 0
+        dx = 0 - dx
+    end
+    if dy < 0
+        dy = 0 - dy
+    end
+
+    return dx + dy
+end
+
+fn main() -> i32
+    let origin: Point = Point { x: 0, y: 0 }
+    let target: Point = make_point(3, 4)
+
+    # Should return 7 (|3| + |4|)
+    return manhattan_distance(target)
+end

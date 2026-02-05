@@ -1,0 +1,39 @@
+# Prime number checker in ALLM
+# Demonstrates: functions, loops, early returns, modulo
+
+fn is_prime(n: i32) -> bool
+    if n <= 1
+        return false
+    end
+    if n <= 3
+        return true
+    end
+    if n % 2 == 0
+        return false
+    end
+
+    let mut i: i32 = 3
+    while i * i <= n
+        if n % i == 0
+            return false
+        end
+        i = i + 2
+    end
+    return true
+end
+
+fn count_primes_up_to(limit: i32) -> i32
+    let mut count: i32 = 0
+    for n in 2..limit
+        if is_prime(n)
+            count = count + 1
+        end
+    end
+    return count
+end
+
+fn main() -> i32
+    # Count primes less than 20
+    # Primes: 2, 3, 5, 7, 11, 13, 17, 19 = 8 primes
+    return count_primes_up_to(20)
+end
