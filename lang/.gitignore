@@ -14,3 +14,5 @@ examples/loops
 examples/conditionals
 examples/prime
 examples/gcd
+examples/memory
+bootstrap/lexer
