@@ -1,0 +1,8 @@
+# Test two externs
+extern fn puts(s: *i8) -> i32
+extern fn malloc(size: i64) -> *i8
+
+fn main() -> i32
+    puts("Hello")
+    return 0
+end

@@ -1,0 +1,30 @@
+# Loop examples in ALLM
+# Demonstrates: for loops, while loops, range iteration
+
+fn sum_range(start: i32, stop: i32) -> i32
+    let mut total: i32 = 0
+    for i in start..stop
+        total = total + i
+    end
+    return total
+end
+
+fn count_down(n: i32) -> i32
+    let mut current: i32 = n
+    let mut steps: i32 = 0
+    while current > 0
+        current = current - 1
+        steps = steps + 1
+    end
+    return steps
+end
+
+fn main() -> i32
+    # sum_range(1, 6) = 1 + 2 + 3 + 4 + 5 = 15
+    let sum: i32 = sum_range(1, 6)
+
+    # count_down(10) = 10
+    let steps: i32 = count_down(10)
+
+    return sum + steps
+end

@@ -1,0 +1,2168 @@
+# ALLM Bootstrap Compiler - LLVM IR Code Generator
+# Generates LLVM IR from AST
+
+# Memory management
+extern fn malloc(size: i64) -> *i8
+extern fn realloc(ptr: *i8, size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+extern fn memset(ptr: *i8, c: i32, n: i64) -> *i8
+
+# String functions
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+extern fn strcpy(dst: *i8, src: *i8) -> *i8
+extern fn strcat(dst: *i8, src: *i8) -> *i8
+extern fn sprintf(s: *i8, fmt: *i8) -> i32
+
+# I/O
+extern fn puts(s: *i8) -> i32
+extern fn putchar(c: i32) -> i32
+extern fn printf(fmt: *i8) -> i32
+extern fn fputs(s: *i8, fp: *i8) -> i32
+extern fn fopen(filename: *i8, mode: *i8) -> *i8
+extern fn fclose(fp: *i8) -> i32
+extern fn exit(code: i32) -> void
+
+# Type kind constants (extern from ast.allm)
+extern fn TYPE_I8() -> i32
+extern fn TYPE_I32() -> i32
+extern fn TYPE_I64() -> i32
+extern fn TYPE_U8() -> i32
+extern fn TYPE_F32() -> i32
+extern fn TYPE_F64() -> i32
+extern fn TYPE_BOOL() -> i32
+extern fn TYPE_VOID() -> i32
+extern fn TYPE_STR() -> i32
+extern fn TYPE_NAMED() -> i32
+extern fn TYPE_PTR() -> i32
+extern fn TYPE_ARRAY() -> i32
+
+# Expression kind constants (extern from ast.allm)
+extern fn EXPR_INTEGER() -> i32
+extern fn EXPR_STRING() -> i32
+extern fn EXPR_BOOL() -> i32
+extern fn EXPR_NULL() -> i32
+extern fn EXPR_IDENT() -> i32
+extern fn EXPR_BINARY() -> i32
+extern fn EXPR_UNARY() -> i32
+extern fn EXPR_CALL() -> i32
+extern fn EXPR_MEMBER() -> i32
+extern fn EXPR_STRUCT_LIT() -> i32
+extern fn EXPR_INDEX() -> i32
+extern fn EXPR_ADDR_OF() -> i32
+extern fn EXPR_DEREF() -> i32
+extern fn EXPR_CAST() -> i32
+
+# Binary operators (extern from ast.allm)
+extern fn OP_ADD() -> i32
+extern fn OP_SUB() -> i32
+extern fn OP_MUL() -> i32
+extern fn OP_DIV() -> i32
+extern fn OP_MOD() -> i32
+extern fn OP_EQ() -> i32
+extern fn OP_NE() -> i32
+extern fn OP_LT() -> i32
+extern fn OP_GT() -> i32
+extern fn OP_LE() -> i32
+extern fn OP_GE() -> i32
+extern fn OP_AND() -> i32
+extern fn OP_OR() -> i32
+
+# Unary operators (extern from ast.allm)
+extern fn UNOP_NOT() -> i32
+extern fn UNOP_NEG() -> i32
+
+# Statement kinds (extern from ast.allm)
+extern fn STMT_LET() -> i32
+extern fn STMT_ASSIGN() -> i32
+extern fn STMT_IF() -> i32
+extern fn STMT_WHILE() -> i32
+extern fn STMT_FOR() -> i32
+extern fn STMT_RETURN() -> i32
+extern fn STMT_EXPR() -> i32
+
+# Declaration kinds (extern from ast.allm)
+extern fn DECL_FUNCTION() -> i32
+extern fn DECL_STRUCT() -> i32
+extern fn DECL_EXTERN() -> i32
+
+# ============================================================
+# AST Structures (from parser.allm)
+# ============================================================
+
+struct Type
+    kind: i32
+    name: *i8
+    name_len: i32
+    inner: *Type
+    element: *Type
+    size: i32
+end
+
+struct Expr
+    kind: i32
+    line: i32
+    col: i32
+    int_value: i64
+    str_value: *i8
+    str_len: i32
+    bool_value: bool
+    op: i32
+    left: *Expr
+    right: *Expr
+    unary_op: i32
+    operand: *Expr
+    args: *ExprList
+    object: *Expr
+    field: *i8
+    field_len: i32
+    struct_name: *i8
+    struct_name_len: i32
+    struct_fields: *FieldInitList
+    index_obj: *Expr
+    index: *Expr
+    cast_type: *Type
+end
+
+struct ExprList
+    expr: *Expr
+    next: *ExprList
+end
+
+struct FieldInit
+    name: *i8
+    name_len: i32
+    value: *Expr
+end
+
+struct FieldInitList
+    field: *FieldInit
+    next: *FieldInitList
+end
+
+struct Stmt
+    kind: i32
+    line: i32
+    col: i32
+    let_name: *i8
+    let_name_len: i32
+    let_mutable: bool
+    let_type: *Type
+    let_init: *Expr
+    assign_target: *Expr
+    assign_value: *Expr
+    if_cond: *Expr
+    if_then: *StmtList
+    if_else_ifs: *ElseIfList
+    if_else: *StmtList
+    while_cond: *Expr
+    while_body: *StmtList
+    for_var: *i8
+    for_var_len: i32
+    for_start: *Expr
+    for_end: *Expr
+    for_body: *StmtList
+    return_value: *Expr
+    expr_stmt: *Expr
+end
+
+struct StmtList
+    stmt: *Stmt
+    next: *StmtList
+end
+
+struct ElseIf
+    cond: *Expr
+    body: *StmtList
+end
+
+struct ElseIfList
+    elif: *ElseIf
+    next: *ElseIfList
+end
+
+struct Param
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct ParamList
+    param: *Param
+    next: *ParamList
+end
+
+struct StructField
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct StructFieldList
+    field: *StructField
+    next: *StructFieldList
+end
+
+struct Decl
+    kind: i32
+    line: i32
+    col: i32
+    name: *i8
+    name_len: i32
+    params: *ParamList
+    return_type: *Type
+    body: *StmtList
+    fields: *StructFieldList
+end
+
+struct DeclList
+    decl: *Decl
+    next: *DeclList
+end
+
+struct Program
+    decls: *DeclList
+end
+
+# ============================================================
+# String buffer for output
+# ============================================================
+
+struct StringBuffer
+    data: *i8
+    len: i64
+    capacity: i64
+end
+
+fn sb_new() -> *StringBuffer
+    let sb: *StringBuffer = malloc(32) as *StringBuffer
+    (^sb).data = malloc(4096)
+    (^sb).len = 0
+    (^sb).capacity = 4096
+    let d: *i8 = (^sb).data
+    d[0] = 0
+    return sb
+end
+
+fn sb_grow(sb: *StringBuffer, needed: i64) -> void
+    if (^sb).len + needed >= (^sb).capacity
+        let new_cap: i64 = (^sb).capacity * 2
+        while new_cap < (^sb).len + needed
+            new_cap = new_cap * 2
+        end
+        let new_data: *i8 = malloc(new_cap)
+        memcpy(new_data, (^sb).data, (^sb).len)
+        free((^sb).data)
+        (^sb).data = new_data
+        (^sb).capacity = new_cap
+    end
+end
+
+fn sb_append(sb: *StringBuffer, s: *i8) -> void
+    let slen: i64 = strlen(s)
+    sb_grow(sb, slen + 1)
+    let dest: *i8 = (^sb).data + (^sb).len
+    memcpy(dest, s, slen)
+    (^sb).len = (^sb).len + slen
+    let d: *i8 = (^sb).data
+    d[(^sb).len] = 0
+end
+
+fn sb_append_n(sb: *StringBuffer, s: *i8, n: i32) -> void
+    let slen: i64 = n
+    sb_grow(sb, slen + 1)
+    let dest: *i8 = (^sb).data + (^sb).len
+    memcpy(dest, s, slen)
+    (^sb).len = (^sb).len + slen
+    let d: *i8 = (^sb).data
+    d[(^sb).len] = 0
+end
+
+fn sb_append_char(sb: *StringBuffer, c: i32) -> void
+    sb_grow(sb, 2)
+    let d: *i8 = (^sb).data
+    d[(^sb).len] = c
+    (^sb).len = (^sb).len + 1
+    d[(^sb).len] = 0
+end
+
+fn sb_append_int(sb: *StringBuffer, n: i64) -> void
+    let arr: *i8 = malloc(32)
+    let mut val: i64 = n
+    let mut neg: bool = false
+    if val < 0
+        neg = true
+        val = 0 - val
+    end
+    let mut i: i32 = 30
+    arr[31] = 0  # Null terminate
+    if val == 0
+        arr[i] = 48
+        i = i - 1
+    else
+        while val > 0
+            let digit: i32 = val % 10
+            arr[i] = 48 + digit
+            i = i - 1
+            val = val / 10
+        end
+    end
+    if neg
+        arr[i] = 45
+        i = i - 1
+    end
+    let start: *i8 = arr + i + 1
+    sb_append(sb, start)
+end
+
+# ============================================================
+# Code generator state
+# ============================================================
+
+struct Variable
+    name: *i8
+    name_len: i32
+    llvm_name: *i8
+    type: *Type
+    mutable: bool
+end
+
+struct VarList
+    var: *Variable
+    next: *VarList
+end
+
+struct FunctionInfo
+    name: *i8
+    name_len: i32
+    params: *ParamList
+    return_type: *Type
+    is_extern: bool
+end
+
+struct FunctionList
+    info: *FunctionInfo
+    next: *FunctionList
+end
+
+struct StructInfo
+    name: *i8
+    name_len: i32
+    fields: *StructFieldList
+end
+
+struct StructList
+    info: *StructInfo
+    next: *StructList
+end
+
+struct StringConst
+    value: *i8
+    value_len: i32
+    name: *i8
+end
+
+struct StringList
+    sc: *StringConst
+    next: *StringList
+end
+
+struct CodeGen
+    output: *StringBuffer
+    temp_counter: i32
+    label_counter: i32
+    var_counter: i32
+    string_counter: i32
+    variables: *VarList
+    functions: *FunctionList
+    structs: *StructList
+    strings: *StringList
+    current_return_type: *Type
+    block_terminated: bool
+end
+
+fn codegen_new() -> *CodeGen
+    let cg: *CodeGen = malloc(128) as *CodeGen
+    (^cg).output = sb_new()
+    (^cg).temp_counter = 0
+    (^cg).label_counter = 0
+    (^cg).var_counter = 0
+    (^cg).string_counter = 0
+    (^cg).variables = null
+    (^cg).functions = null
+    (^cg).structs = null
+    (^cg).strings = null
+    (^cg).current_return_type = null
+    (^cg).block_terminated = false
+    return cg
+end
+
+fn cg_emit(cg: *CodeGen, s: *i8) -> void
+    sb_append((^cg).output, s)
+end
+
+fn cg_emit_n(cg: *CodeGen, s: *i8, n: i32) -> void
+    sb_append_n((^cg).output, s, n)
+end
+
+fn cg_emit_int(cg: *CodeGen, n: i64) -> void
+    sb_append_int((^cg).output, n)
+end
+
+fn cg_emit_char(cg: *CodeGen, c: i32) -> void
+    sb_append_char((^cg).output, c)
+end
+
+fn cg_newline(cg: *CodeGen) -> void
+    sb_append_char((^cg).output, 10)
+end
+
+fn cg_next_temp(cg: *CodeGen) -> i32
+    let t: i32 = (^cg).temp_counter
+    (^cg).temp_counter = t + 1
+    return t
+end
+
+fn cg_next_label(cg: *CodeGen) -> i32
+    let l: i32 = (^cg).label_counter
+    (^cg).label_counter = l + 1
+    return l
+end
+
+fn cg_next_var(cg: *CodeGen) -> i32
+    let v: i32 = (^cg).var_counter
+    (^cg).var_counter = v + 1
+    return v
+end
+
+fn cg_emit_temp(cg: *CodeGen, t: i32) -> void
+    cg_emit(cg, "%t")
+    cg_emit_int(cg, t)
+end
+
+fn cg_emit_label(cg: *CodeGen, prefix: *i8, l: i32) -> void
+    cg_emit(cg, prefix)
+    cg_emit(cg, ".")
+    cg_emit_int(cg, l)
+end
+
+# ============================================================
+# Variable lookup
+# ============================================================
+
+fn cg_add_var(cg: *CodeGen, name: *i8, name_len: i32, llvm_name: *i8, typ: *Type, mutable: bool) -> void
+    let v: *Variable = malloc(64) as *Variable
+    (^v).name = name
+    (^v).name_len = name_len
+    (^v).llvm_name = llvm_name
+    (^v).type = typ
+    (^v).mutable = mutable
+
+    let node: *VarList = malloc(24) as *VarList
+    (^node).var = v
+    (^node).next = (^cg).variables
+    (^cg).variables = node
+end
+
+fn cg_find_var(cg: *CodeGen, name: *i8, name_len: i32) -> *Variable
+    let mut cur: *VarList = (^cg).variables
+    while cur != null
+        let v: *Variable = (^cur).var
+        if (^v).name_len == name_len and strncmp((^v).name, name, name_len) == 0
+            return v
+        end
+        cur = (^cur).next
+    end
+    return null
+end
+
+# ============================================================
+# Function/struct lookup
+# ============================================================
+
+fn cg_add_func(cg: *CodeGen, name: *i8, name_len: i32, params: *ParamList, ret: *Type, is_extern: bool) -> void
+    let info: *FunctionInfo = malloc(64) as *FunctionInfo
+    (^info).name = name
+    (^info).name_len = name_len
+    (^info).params = params
+    (^info).return_type = ret
+    (^info).is_extern = is_extern
+
+    let node: *FunctionList = malloc(24) as *FunctionList
+    (^node).info = info
+    (^node).next = (^cg).functions
+    (^cg).functions = node
+end
+
+fn cg_find_func(cg: *CodeGen, name: *i8, name_len: i32) -> *FunctionInfo
+    let mut cur: *FunctionList = (^cg).functions
+    while cur != null
+        let info: *FunctionInfo = (^cur).info
+        if (^info).name_len == name_len and strncmp((^info).name, name, name_len) == 0
+            return info
+        end
+        cur = (^cur).next
+    end
+    return null
+end
+
+fn cg_add_struct(cg: *CodeGen, name: *i8, name_len: i32, fields: *StructFieldList) -> void
+    let info: *StructInfo = malloc(48) as *StructInfo
+    (^info).name = name
+    (^info).name_len = name_len
+    (^info).fields = fields
+
+    let node: *StructList = malloc(24) as *StructList
+    (^node).info = info
+    (^node).next = (^cg).structs
+    (^cg).structs = node
+end
+
+fn cg_find_struct(cg: *CodeGen, name: *i8, name_len: i32) -> *StructInfo
+    let mut cur: *StructList = (^cg).structs
+    while cur != null
+        let info: *StructInfo = (^cur).info
+        if (^info).name_len == name_len and strncmp((^info).name, name, name_len) == 0
+            return info
+        end
+        cur = (^cur).next
+    end
+    return null
+end
+
+fn cg_find_field_index(info: *StructInfo, name: *i8, name_len: i32) -> i32
+    let mut index: i32 = 0
+    let mut cur: *StructFieldList = (^info).fields
+    while cur != null
+        let f: *StructField = (^cur).field
+        if (^f).name_len == name_len and strncmp((^f).name, name, name_len) == 0
+            return index
+        end
+        index = index + 1
+        cur = (^cur).next
+    end
+    return 0 - 1
+end
+
+fn cg_get_field_type(info: *StructInfo, name: *i8, name_len: i32) -> *Type
+    let mut cur: *StructFieldList = (^info).fields
+    while cur != null
+        let f: *StructField = (^cur).field
+        if (^f).name_len == name_len and strncmp((^f).name, name, name_len) == 0
+            return (^f).type
+        end
+        cur = (^cur).next
+    end
+    return null
+end
+
+# ============================================================
+# Type to LLVM
+# ============================================================
+
+fn cg_type_to_llvm(cg: *CodeGen, t: *Type) -> void
+    let k: i32 = (^t).kind
+    if k == TYPE_I8()
+        cg_emit(cg, "i8")
+    else if k == TYPE_I32()
+        cg_emit(cg, "i32")
+    else if k == TYPE_I64()
+        cg_emit(cg, "i64")
+    else if k == TYPE_U8()
+        cg_emit(cg, "i8")
+    else if k == TYPE_F32()
+        cg_emit(cg, "float")
+    else if k == TYPE_F64()
+        cg_emit(cg, "double")
+    else if k == TYPE_BOOL()
+        cg_emit(cg, "i1")
+    else if k == TYPE_VOID()
+        cg_emit(cg, "void")
+    else if k == TYPE_STR()
+        cg_emit(cg, "ptr")
+    else if k == TYPE_PTR()
+        cg_emit(cg, "ptr")
+    else if k == TYPE_NAMED()
+        cg_emit(cg, "%")
+        cg_emit_n(cg, (^t).name, (^t).name_len)
+    else if k == TYPE_ARRAY()
+        cg_emit(cg, "[")
+        cg_emit_int(cg, (^t).size)
+        cg_emit(cg, " x ")
+        cg_type_to_llvm(cg, (^t).element)
+        cg_emit(cg, "]")
+    end
+end
+
+# Get the LLVM type string for a type kind
+fn cg_type_kind_to_str(kind: i32) -> *i8
+    if kind == TYPE_I64()
+        return "i64"
+    else if kind == TYPE_BOOL()
+        return "i1"
+    else if kind == TYPE_PTR()
+        return "ptr"
+    end
+    return "i32"
+end
+
+# ============================================================
+# Expression code generation
+# ============================================================
+
+fn cg_gen_expr(cg: *CodeGen, e: *Expr) -> i32
+    let k: i32 = (^e).kind
+
+    if k == EXPR_INTEGER()
+        return cg_gen_integer(cg, e)
+    else if k == EXPR_STRING()
+        return cg_gen_string(cg, e)
+    else if k == EXPR_BOOL()
+        return cg_gen_bool(cg, e)
+    else if k == EXPR_NULL()
+        return cg_gen_null(cg, e)
+    else if k == EXPR_IDENT()
+        return cg_gen_ident(cg, e)
+    else if k == EXPR_BINARY()
+        return cg_gen_binary(cg, e)
+    else if k == EXPR_UNARY()
+        return cg_gen_unary(cg, e)
+    else if k == EXPR_CALL()
+        return cg_gen_call(cg, e)
+    else if k == EXPR_MEMBER()
+        return cg_gen_member(cg, e)
+    else if k == EXPR_INDEX()
+        return cg_gen_index(cg, e)
+    else if k == EXPR_ADDR_OF()
+        return cg_gen_addr_of(cg, e)
+    else if k == EXPR_DEREF()
+        return cg_gen_deref(cg, e)
+    else if k == EXPR_CAST()
+        return cg_gen_cast(cg, e)
+    else if k == EXPR_STRUCT_LIT()
+        return cg_gen_struct_lit(cg, e)
+    end
+
+    return 0 - 1
+end
+
+fn cg_gen_integer(cg: *CodeGen, e: *Expr) -> i32
+    # Just return the value directly as a constant
+    return 0 - (^e).int_value - 1
+end
+
+fn cg_gen_string(cg: *CodeGen, e: *Expr) -> i32
+    # Add string constant and return its reference
+    let sc: *StringConst = malloc(32) as *StringConst
+    (^sc).value = (^e).str_value
+    (^sc).value_len = (^e).str_len
+
+    let name: *i8 = malloc(32)
+    let mut i: i32 = 0
+    name[i] = 64
+    i = i + 1
+    name[i] = 46
+    i = i + 1
+    name[i] = 115
+    i = i + 1
+    name[i] = 116
+    i = i + 1
+    name[i] = 114
+    i = i + 1
+    name[i] = 46
+    i = i + 1
+    # Add number
+    let num: i32 = (^cg).string_counter
+    (^cg).string_counter = num + 1
+    if num == 0
+        name[i] = 48
+        i = i + 1
+    else
+        let mut n: i32 = num
+        let mut digits: i32 = 0
+        let mut temp: i32 = n
+        while temp > 0
+            digits = digits + 1
+            temp = temp / 10
+        end
+        i = i + digits
+        while n > 0
+            i = i - 1
+            name[i] = 48 + (n % 10)
+            n = n / 10
+        end
+        i = i + digits
+    end
+    name[i] = 0
+    (^sc).name = name
+
+    let node: *StringList = malloc(24) as *StringList
+    (^node).sc = sc
+    (^node).next = (^cg).strings
+    (^cg).strings = node
+
+    # Return special marker for string constant
+    # Use computed base to avoid the literal appearing in encoded output
+    let base: i32 = 1050000000
+    base = base + 1050000000
+    return 0 - base - num
+end
+
+fn cg_gen_bool(cg: *CodeGen, e: *Expr) -> i32
+    if (^e).bool_value
+        return 0 - 2
+    else
+        return 0 - 1
+    end
+end
+
+fn cg_gen_null(cg: *CodeGen, e: *Expr) -> i32
+    return 0 - 9999
+end
+
+fn cg_gen_ident(cg: *CodeGen, e: *Expr) -> i32
+    let v: *Variable = cg_find_var(cg, (^e).str_value, (^e).str_len)
+    if v == null
+        puts("Undefined variable")
+        exit(1)
+    end
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = load ")
+    cg_type_to_llvm(cg, (^v).type)
+    cg_emit(cg, ", ptr ")
+    cg_emit(cg, (^v).llvm_name)
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_binary(cg: *CodeGen, e: *Expr) -> i32
+    # Infer type of left operand for proper type selection
+    let left_type_ptr: *Type = cg_infer_type(cg, (^e).left)
+    let left_type_kind: i32 = (^left_type_ptr).kind
+    let type_str: *i8 = cg_type_kind_to_str(left_type_kind)
+
+    let left_t: i32 = cg_gen_expr(cg, (^e).left)
+    let right_t: i32 = cg_gen_expr(cg, (^e).right)
+    let op: i32 = (^e).op
+
+    # Handle pointer arithmetic specially - need to convert index first
+    if op == OP_ADD() and (left_type_kind == TYPE_PTR() or left_type_kind == TYPE_STR())
+        # Convert index to i64 if it's i32
+        let right_type_ptr: *Type = cg_infer_type(cg, (^e).right)
+        let right_type_kind: i32 = (^right_type_ptr).kind
+        let mut idx_t: i32 = right_t
+        if right_type_kind == TYPE_I32()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, right_t)
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            idx_t = conv_t
+        end
+        let t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = getelementptr inbounds ")
+        # Use the inner type for proper pointer arithmetic scaling
+        let inner_type: *Type = (^left_type_ptr).inner
+        if inner_type != null
+            cg_type_to_llvm(cg, inner_type)
+        else
+            cg_emit(cg, "i8")
+        end
+        cg_emit(cg, ", ptr ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, ", i64 ")
+        cg_emit_operand(cg, idx_t)
+        cg_newline(cg)
+        return t
+    end
+
+    # Handle type promotion for mixed i32/i64 operations
+    let right_type_ptr: *Type = cg_infer_type(cg, (^e).right)
+    let right_type_kind: i32 = (^right_type_ptr).kind
+    let mut actual_right_t: i32 = right_t
+    let mut actual_left_t: i32 = left_t
+    let mut use_type: *i8 = type_str
+
+    # Promote right to i64 if left is i64
+    if left_type_kind == TYPE_I64() and right_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, right_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_right_t = conv_t
+    end
+
+    # Promote left to i64 if right is i64
+    if left_type_kind == TYPE_I32() and right_type_kind == TYPE_I64()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_left_t = conv_t
+        use_type = "i64"
+    end
+
+    # Promote left i8 to i32 if right is i32
+    if (left_type_kind == TYPE_I8() or left_type_kind == TYPE_U8()) and right_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        actual_left_t = conv_t
+        use_type = "i32"
+    end
+
+    # Promote right i8 to i32 if left is i32
+    if left_type_kind == TYPE_I32() and (right_type_kind == TYPE_I8() or right_type_kind == TYPE_U8())
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, right_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        actual_right_t = conv_t
+    end
+
+    let t: i32 = cg_next_temp(cg)
+
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = ")
+
+    if op == OP_ADD()
+        cg_emit(cg, "add ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_SUB()
+        cg_emit(cg, "sub ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_MUL()
+        cg_emit(cg, "mul ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_DIV()
+        cg_emit(cg, "sdiv ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_MOD()
+        cg_emit(cg, "srem ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_EQ()
+        cg_emit(cg, "icmp eq ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_NE()
+        cg_emit(cg, "icmp ne ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_LT()
+        cg_emit(cg, "icmp slt ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_GT()
+        cg_emit(cg, "icmp sgt ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_LE()
+        cg_emit(cg, "icmp sle ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_GE()
+        cg_emit(cg, "icmp sge ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
+    else if op == OP_AND()
+        cg_emit(cg, "and i1 ")
+    else if op == OP_OR()
+        cg_emit(cg, "or i1 ")
+    end
+
+    cg_emit_operand(cg, actual_left_t)
+    cg_emit(cg, ", ")
+    cg_emit_operand(cg, actual_right_t)
+    cg_newline(cg)
+
+    return t
+end
+
+fn cg_emit_operand(cg: *CodeGen, t: i32) -> void
+    if t >= 0
+        cg_emit_temp(cg, t)
+    else if t == 0 - 1
+        cg_emit(cg, "0")
+    else if t == 0 - 2
+        cg_emit(cg, "1")
+    else if t == 0 - 9999
+        cg_emit(cg, "null")
+    else
+        # Check for string constant using computed base
+        let base: i32 = 1050000000
+        base = base + 1050000000
+        if t <= 0 - base
+            let idx: i32 = 0 - t - base
+            cg_emit(cg, "@.str.")
+            cg_emit_int(cg, idx)
+        else
+            let val: i64 = 0 - t - 1
+            cg_emit_int(cg, val)
+        end
+    end
+end
+
+fn cg_gen_unary(cg: *CodeGen, e: *Expr) -> i32
+    let operand_t: i32 = cg_gen_expr(cg, (^e).operand)
+    let op: i32 = (^e).unary_op
+    let t: i32 = cg_next_temp(cg)
+
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = ")
+
+    if op == UNOP_NEG()
+        cg_emit(cg, "sub i32 0, ")
+        cg_emit_operand(cg, operand_t)
+    else if op == UNOP_NOT()
+        cg_emit(cg, "xor i1 ")
+        cg_emit_operand(cg, operand_t)
+        cg_emit(cg, ", 1")
+    end
+
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_call(cg: *CodeGen, e: *Expr) -> i32
+    let func: *FunctionInfo = cg_find_func(cg, (^e).str_value, (^e).str_len)
+    if func == null
+        puts("Unknown function")
+        exit(1)
+    end
+
+    # Generate arguments
+    let arg_arr: *i32 = malloc(128) as *i32
+    let mut arg_count: i32 = 0
+    let mut arg_cur: *ExprList = (^e).args
+    while arg_cur != null
+        let arg_e: *Expr = (^arg_cur).expr
+        let arg_t: i32 = cg_gen_expr(cg, arg_e)
+        arg_arr[arg_count] = arg_t
+        arg_count = arg_count + 1
+        arg_cur = (^arg_cur).next
+    end
+
+    let ret_type: *Type = (^func).return_type
+    let is_void: bool = (^ret_type).kind == TYPE_VOID()
+
+    # Check for type conversions needed BEFORE emitting the call
+    let arg_converted: *i32 = malloc(128) as *i32
+    let mut param_check: *ParamList = (^func).params
+    let mut arg_check: *ExprList = (^e).args
+    let mut j: i32 = 0
+    while j < arg_count
+        arg_converted[j] = arg_arr[j]
+        let param_p: *Param = (^param_check).param
+        let param_type_kind: i32 = (^(^param_p).type).kind
+        let arg_e: *Expr = (^arg_check).expr
+        let arg_type: *Type = cg_infer_type(cg, arg_e)
+        let arg_type_kind: i32 = (^arg_type).kind
+
+        # Convert i32 to i64 if needed
+        if arg_type_kind == TYPE_I32() and param_type_kind == TYPE_I64()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, arg_arr[j])
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            arg_converted[j] = conv_t
+        end
+
+        param_check = (^param_check).next
+        arg_check = (^arg_check).next
+        j = j + 1
+    end
+
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    if not is_void
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = ")
+    end
+    cg_emit(cg, "call ")
+    cg_type_to_llvm(cg, ret_type)
+    cg_emit(cg, " @")
+    cg_emit_n(cg, (^e).str_value, (^e).str_len)
+    cg_emit(cg, "(")
+
+    let mut param_cur: *ParamList = (^func).params
+    let mut i: i32 = 0
+    while i < arg_count
+        if i > 0
+            cg_emit(cg, ", ")
+        end
+        let param: *Param = (^param_cur).param
+        cg_type_to_llvm(cg, (^param).type)
+        cg_emit(cg, " ")
+        cg_emit_operand(cg, arg_converted[i])
+        param_cur = (^param_cur).next
+        i = i + 1
+    end
+
+    cg_emit(cg, ")")
+    cg_newline(cg)
+
+    if is_void
+        return 0 - 1
+    end
+    return t
+end
+
+fn cg_gen_member(cg: *CodeGen, e: *Expr) -> i32
+    # Get pointer to member
+    let ptr_t: i32 = cg_gen_expr_ptr(cg, e)
+    let obj_type: *Type = cg_infer_type(cg, (^e).object)
+    if (^obj_type).kind != TYPE_NAMED()
+        puts("Cannot access member of non-struct")
+        exit(1)
+    end
+    let info: *StructInfo = cg_find_struct(cg, (^obj_type).name, (^obj_type).name_len)
+    let field_type: *Type = cg_get_field_type(info, (^e).field, (^e).field_len)
+
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = load ")
+    cg_type_to_llvm(cg, field_type)
+    cg_emit(cg, ", ptr ")
+    cg_emit_temp(cg, ptr_t)
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_index(cg: *CodeGen, e: *Expr) -> i32
+    let obj_t: i32 = cg_gen_expr(cg, (^e).index_obj)
+    let idx_t: i32 = cg_gen_expr(cg, (^e).index)
+    let obj_type: *Type = cg_infer_type(cg, (^e).index_obj)
+
+    # Convert index to i64 if needed
+    let idx_type: *Type = cg_infer_type(cg, (^e).index)
+    let mut actual_idx: i32 = idx_t
+    if (^idx_type).kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, idx_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_idx = conv_t
+    end
+
+    let gep_t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, gep_t)
+    cg_emit(cg, " = getelementptr inbounds ")
+
+    if (^obj_type).kind == TYPE_PTR()
+        cg_type_to_llvm(cg, (^obj_type).inner)
+    else
+        cg_emit(cg, "i8")
+    end
+    cg_emit(cg, ", ptr ")
+    cg_emit_operand(cg, obj_t)
+    cg_emit(cg, ", i64 ")
+    cg_emit_operand(cg, actual_idx)
+    cg_newline(cg)
+
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = load ")
+    if (^obj_type).kind == TYPE_PTR()
+        cg_type_to_llvm(cg, (^obj_type).inner)
+    else
+        cg_emit(cg, "i8")
+    end
+    cg_emit(cg, ", ptr ")
+    cg_emit_temp(cg, gep_t)
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_addr_of(cg: *CodeGen, e: *Expr) -> i32
+    return cg_gen_expr_ptr(cg, (^e).operand)
+end
+
+fn cg_gen_deref(cg: *CodeGen, e: *Expr) -> i32
+    let ptr_t: i32 = cg_gen_expr(cg, (^e).operand)
+    let ptr_type: *Type = cg_infer_type(cg, (^e).operand)
+    if (^ptr_type).kind != TYPE_PTR()
+        puts("Cannot deref non-pointer")
+        exit(1)
+    end
+
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = load ")
+    cg_type_to_llvm(cg, (^ptr_type).inner)
+    cg_emit(cg, ", ptr ")
+    cg_emit_operand(cg, ptr_t)
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_cast(cg: *CodeGen, e: *Expr) -> i32
+    let val_t: i32 = cg_gen_expr(cg, (^e).operand)
+    # For pointer casts with opaque pointers, no actual cast needed
+    return val_t
+end
+
+fn cg_gen_struct_lit(cg: *CodeGen, e: *Expr) -> i32
+    let info: *StructInfo = cg_find_struct(cg, (^e).struct_name, (^e).struct_name_len)
+    if info == null
+        puts("Unknown struct")
+        exit(1)
+    end
+
+    # Allocate struct on stack
+    let alloca_t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, alloca_t)
+    cg_emit(cg, " = alloca %")
+    cg_emit_n(cg, (^e).struct_name, (^e).struct_name_len)
+    cg_newline(cg)
+
+    # Initialize fields
+    let mut cur: *FieldInitList = (^e).struct_fields
+    while cur != null
+        let fi: *FieldInit = (^cur).field
+        let idx: i32 = cg_find_field_index(info, (^fi).name, (^fi).name_len)
+        let field_type: *Type = cg_get_field_type(info, (^fi).name, (^fi).name_len)
+        let val_t: i32 = cg_gen_expr(cg, (^fi).value)
+
+        let gep_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, gep_t)
+        cg_emit(cg, " = getelementptr inbounds %")
+        cg_emit_n(cg, (^e).struct_name, (^e).struct_name_len)
+        cg_emit(cg, ", ptr ")
+        cg_emit_temp(cg, alloca_t)
+        cg_emit(cg, ", i32 0, i32 ")
+        cg_emit_int(cg, idx)
+        cg_newline(cg)
+
+        cg_emit(cg, "  store ")
+        cg_type_to_llvm(cg, field_type)
+        cg_emit(cg, " ")
+        cg_emit_operand(cg, val_t)
+        cg_emit(cg, ", ptr ")
+        cg_emit_temp(cg, gep_t)
+        cg_newline(cg)
+
+        cur = (^cur).next
+    end
+
+    # Load struct value
+    let t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, t)
+    cg_emit(cg, " = load %")
+    cg_emit_n(cg, (^e).struct_name, (^e).struct_name_len)
+    cg_emit(cg, ", ptr ")
+    cg_emit_temp(cg, alloca_t)
+    cg_newline(cg)
+    return t
+end
+
+fn cg_gen_expr_ptr(cg: *CodeGen, e: *Expr) -> i32
+    let k: i32 = (^e).kind
+
+    if k == EXPR_IDENT()
+        let v: *Variable = cg_find_var(cg, (^e).str_value, (^e).str_len)
+        if v == null
+            puts("Undefined variable")
+            exit(1)
+        end
+        # Return temp with ptr directly
+        let t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = bitcast ptr ")
+        cg_emit(cg, (^v).llvm_name)
+        cg_emit(cg, " to ptr")
+        cg_newline(cg)
+        return t
+    else if k == EXPR_MEMBER()
+        let obj_ptr_t: i32 = cg_gen_expr_ptr(cg, (^e).object)
+        let obj_type: *Type = cg_infer_type(cg, (^e).object)
+        if (^obj_type).kind != TYPE_NAMED()
+            puts("Cannot access member of non-struct")
+            exit(1)
+        end
+        let info: *StructInfo = cg_find_struct(cg, (^obj_type).name, (^obj_type).name_len)
+        let idx: i32 = cg_find_field_index(info, (^e).field, (^e).field_len)
+
+        let t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = getelementptr inbounds %")
+        cg_emit_n(cg, (^obj_type).name, (^obj_type).name_len)
+        cg_emit(cg, ", ptr ")
+        cg_emit_temp(cg, obj_ptr_t)
+        cg_emit(cg, ", i32 0, i32 ")
+        cg_emit_int(cg, idx)
+        cg_newline(cg)
+        return t
+    else if k == EXPR_DEREF()
+        return cg_gen_expr(cg, (^e).operand)
+    else if k == EXPR_INDEX()
+        let obj_t: i32 = cg_gen_expr(cg, (^e).index_obj)
+        let idx_t: i32 = cg_gen_expr(cg, (^e).index)
+        let obj_type: *Type = cg_infer_type(cg, (^e).index_obj)
+
+        # Convert index to i64 if needed
+        let idx_type: *Type = cg_infer_type(cg, (^e).index)
+        let mut actual_idx: i32 = idx_t
+        if (^idx_type).kind == TYPE_I32()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, idx_t)
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            actual_idx = conv_t
+        end
+
+        let t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = getelementptr inbounds ")
+        if (^obj_type).kind == TYPE_PTR()
+            cg_type_to_llvm(cg, (^obj_type).inner)
+        else
+            cg_emit(cg, "i8")
+        end
+        cg_emit(cg, ", ptr ")
+        cg_emit_operand(cg, obj_t)
+        cg_emit(cg, ", i64 ")
+        cg_emit_operand(cg, actual_idx)
+        cg_newline(cg)
+        return t
+    end
+
+    puts("Cannot get pointer to expr")
+    exit(1)
+    return 0
+end
+
+fn cg_infer_type(cg: *CodeGen, e: *Expr) -> *Type
+    let k: i32 = (^e).kind
+
+    if k == EXPR_INTEGER()
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_I32()
+        return t
+    else if k == EXPR_BOOL()
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_BOOL()
+        return t
+    else if k == EXPR_NULL()
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_PTR()
+        let inner: *Type = malloc(64) as *Type
+        (^inner).kind = TYPE_VOID()
+        (^t).inner = inner
+        return t
+    else if k == EXPR_STRING()
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_STR()
+        return t
+    else if k == EXPR_IDENT()
+        let v: *Variable = cg_find_var(cg, (^e).str_value, (^e).str_len)
+        if v != null
+            return (^v).type
+        end
+    else if k == EXPR_CALL()
+        let func: *FunctionInfo = cg_find_func(cg, (^e).str_value, (^e).str_len)
+        if func != null
+            return (^func).return_type
+        end
+    else if k == EXPR_BINARY()
+        let op: i32 = (^e).op
+        if op >= OP_EQ() and op <= OP_GE()
+            let t: *Type = malloc(64) as *Type
+            (^t).kind = TYPE_BOOL()
+            return t
+        end
+        if op == OP_AND() or op == OP_OR()
+            let t: *Type = malloc(64) as *Type
+            (^t).kind = TYPE_BOOL()
+            return t
+        end
+        # For arithmetic, return the larger type
+        let left_t: *Type = cg_infer_type(cg, (^e).left)
+        let right_t: *Type = cg_infer_type(cg, (^e).right)
+        if (^left_t).kind == TYPE_I64() or (^right_t).kind == TYPE_I64()
+            let t: *Type = malloc(64) as *Type
+            (^t).kind = TYPE_I64()
+            return t
+        end
+        return left_t
+    else if k == EXPR_UNARY()
+        if (^e).unary_op == UNOP_NOT()
+            let t: *Type = malloc(64) as *Type
+            (^t).kind = TYPE_BOOL()
+            return t
+        end
+        return cg_infer_type(cg, (^e).operand)
+    else if k == EXPR_MEMBER()
+        let obj_type: *Type = cg_infer_type(cg, (^e).object)
+        if (^obj_type).kind == TYPE_NAMED()
+            let info: *StructInfo = cg_find_struct(cg, (^obj_type).name, (^obj_type).name_len)
+            if info != null
+                return cg_get_field_type(info, (^e).field, (^e).field_len)
+            end
+        end
+    else if k == EXPR_INDEX()
+        let obj_type: *Type = cg_infer_type(cg, (^e).index_obj)
+        if (^obj_type).kind == TYPE_PTR()
+            return (^obj_type).inner
+        end
+    else if k == EXPR_ADDR_OF()
+        let inner: *Type = cg_infer_type(cg, (^e).operand)
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_PTR()
+        (^t).inner = inner
+        return t
+    else if k == EXPR_DEREF()
+        let ptr_type: *Type = cg_infer_type(cg, (^e).operand)
+        if (^ptr_type).kind == TYPE_PTR()
+            return (^ptr_type).inner
+        end
+    else if k == EXPR_CAST()
+        return (^e).cast_type
+    else if k == EXPR_STRUCT_LIT()
+        let t: *Type = malloc(64) as *Type
+        (^t).kind = TYPE_NAMED()
+        (^t).name = (^e).struct_name
+        (^t).name_len = (^e).struct_name_len
+        return t
+    end
+
+    let t: *Type = malloc(64) as *Type
+    (^t).kind = TYPE_I32()
+    return t
+end
+
+# ============================================================
+# Statement code generation
+# ============================================================
+
+fn cg_gen_stmt(cg: *CodeGen, s: *Stmt) -> void
+    let k: i32 = (^s).kind
+
+    if k == STMT_LET()
+        cg_gen_let(cg, s)
+    else if k == STMT_ASSIGN()
+        cg_gen_assign(cg, s)
+    else if k == STMT_IF()
+        cg_gen_if(cg, s)
+    else if k == STMT_WHILE()
+        cg_gen_while(cg, s)
+    else if k == STMT_FOR()
+        cg_gen_for(cg, s)
+    else if k == STMT_RETURN()
+        cg_gen_return(cg, s)
+    else if k == STMT_EXPR()
+        cg_gen_expr(cg, (^s).expr_stmt)
+    end
+end
+
+fn cg_gen_let(cg: *CodeGen, s: *Stmt) -> void
+    let vid: i32 = cg_next_var(cg)
+    let llvm_name: *i8 = malloc(64)
+    llvm_name[0] = 37
+    let mut i: i32 = 1
+    let mut j: i32 = 0
+    while j < (^s).let_name_len
+        let src: *i8 = (^s).let_name
+        llvm_name[i] = src[j]
+        i = i + 1
+        j = j + 1
+    end
+    llvm_name[i] = 46
+    i = i + 1
+    if vid == 0
+        llvm_name[i] = 48
+        i = i + 1
+    else
+        let mut n: i32 = vid
+        let mut digits: i32 = 0
+        let mut temp: i32 = n
+        while temp > 0
+            digits = digits + 1
+            temp = temp / 10
+        end
+        i = i + digits
+        while n > 0
+            i = i - 1
+            llvm_name[i] = 48 + (n % 10)
+            n = n / 10
+        end
+        i = i + digits
+    end
+    llvm_name[i] = 0
+
+    cg_emit(cg, "  ")
+    cg_emit(cg, llvm_name)
+    cg_emit(cg, " = alloca ")
+    cg_type_to_llvm(cg, (^s).let_type)
+    cg_newline(cg)
+
+    let init_t: i32 = cg_gen_expr(cg, (^s).let_init)
+
+    # Check if type conversion is needed
+    let init_type: *Type = cg_infer_type(cg, (^s).let_init)
+    let var_type_kind: i32 = (^(^s).let_type).kind
+    let init_type_kind: i32 = (^init_type).kind
+    let mut store_t: i32 = init_t
+
+    # Convert i32 to i8 if needed (truncation)
+    if init_type_kind == TYPE_I32() and var_type_kind == TYPE_I8()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = trunc i32 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i8")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i8 to i32 if needed
+    if init_type_kind == TYPE_I8() and var_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i64 to i32 if needed (truncation)
+    if init_type_kind == TYPE_I64() and var_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = trunc i64 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i32 to i64 if needed (extension)
+    if init_type_kind == TYPE_I32() and var_type_kind == TYPE_I64()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    cg_emit(cg, "  store ")
+    cg_type_to_llvm(cg, (^s).let_type)
+    cg_emit(cg, " ")
+    cg_emit_operand(cg, store_t)
+    cg_emit(cg, ", ptr ")
+    cg_emit(cg, llvm_name)
+    cg_newline(cg)
+
+    cg_add_var(cg, (^s).let_name, (^s).let_name_len, llvm_name, (^s).let_type, (^s).let_mutable)
+end
+
+fn cg_gen_assign(cg: *CodeGen, s: *Stmt) -> void
+    let target: *Expr = (^s).assign_target
+    let value_t: i32 = cg_gen_expr(cg, (^s).assign_value)
+
+    let tk: i32 = (^target).kind
+    if tk == EXPR_IDENT()
+        let v: *Variable = cg_find_var(cg, (^target).str_value, (^target).str_len)
+        cg_emit(cg, "  store ")
+        cg_type_to_llvm(cg, (^v).type)
+        cg_emit(cg, " ")
+        cg_emit_operand(cg, value_t)
+        cg_emit(cg, ", ptr ")
+        cg_emit(cg, (^v).llvm_name)
+        cg_newline(cg)
+    else if tk == EXPR_MEMBER() or tk == EXPR_DEREF() or tk == EXPR_INDEX()
+        let ptr_t: i32 = cg_gen_expr_ptr(cg, target)
+        let target_type: *Type = cg_infer_type(cg, target)
+        let value_type: *Type = cg_infer_type(cg, (^s).assign_value)
+        let target_kind: i32 = (^target_type).kind
+        let value_kind: i32 = (^value_type).kind
+        let mut actual_value: i32 = value_t
+
+        # Handle type conversions
+        if value_kind == TYPE_I32() and target_kind == TYPE_I8()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = trunc i32 ")
+            cg_emit_operand(cg, value_t)
+            cg_emit(cg, " to i8")
+            cg_newline(cg)
+            actual_value = conv_t
+        end
+
+        cg_emit(cg, "  store ")
+        cg_type_to_llvm(cg, target_type)
+        cg_emit(cg, " ")
+        cg_emit_operand(cg, actual_value)
+        cg_emit(cg, ", ptr ")
+        cg_emit_temp(cg, ptr_t)
+        cg_newline(cg)
+    end
+end
+
+fn cg_gen_if(cg: *CodeGen, s: *Stmt) -> void
+    let cond_t: i32 = cg_gen_expr(cg, (^s).if_cond)
+    let then_lbl: i32 = cg_next_label(cg)
+    let end_lbl: i32 = cg_next_label(cg)
+    let mut else_lbl: i32 = end_lbl
+    if (^s).if_else_ifs != null or (^s).if_else != null
+        else_lbl = cg_next_label(cg)
+    end
+
+    cg_emit(cg, "  br i1 ")
+    cg_emit_operand(cg, cond_t)
+    cg_emit(cg, ", label %")
+    cg_emit_label(cg, "then", then_lbl)
+    cg_emit(cg, ", label %")
+    if else_lbl == end_lbl
+        cg_emit_label(cg, "endif", end_lbl)
+    else
+        cg_emit_label(cg, "else", else_lbl)
+    end
+    cg_newline(cg)
+
+    # Then block
+    cg_emit_label(cg, "then", then_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+    (^cg).block_terminated = false
+    cg_gen_stmts(cg, (^s).if_then)
+    let then_terminated: bool = (^cg).block_terminated
+    if not then_terminated
+        cg_emit(cg, "  br label %")
+        cg_emit_label(cg, "endif", end_lbl)
+        cg_newline(cg)
+    end
+
+    # Else-if blocks
+    let mut else_terminated: bool = false
+    let mut cur_elif: *ElseIfList = (^s).if_else_ifs
+    let mut prev_else_lbl: i32 = else_lbl
+    while cur_elif != null
+        # Emit the else label for this elif
+        cg_emit_label(cg, "else", prev_else_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+
+        # Generate condition
+        let elif_cond_t: i32 = cg_gen_expr(cg, (^(^cur_elif).elif).cond)
+        let elif_then_lbl: i32 = cg_next_label(cg)
+        let mut elif_else_lbl: i32 = end_lbl
+        if (^cur_elif).next != null or (^s).if_else != null
+            elif_else_lbl = cg_next_label(cg)
+        end
+
+        cg_emit(cg, "  br i1 ")
+        cg_emit_operand(cg, elif_cond_t)
+        cg_emit(cg, ", label %")
+        cg_emit_label(cg, "elifthen", elif_then_lbl)
+        cg_emit(cg, ", label %")
+        if elif_else_lbl == end_lbl
+            cg_emit_label(cg, "endif", end_lbl)
+        else
+            cg_emit_label(cg, "else", elif_else_lbl)
+        end
+        cg_newline(cg)
+
+        # Elif then block
+        cg_emit_label(cg, "elifthen", elif_then_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+        (^cg).block_terminated = false
+        cg_gen_stmts(cg, (^(^cur_elif).elif).body)
+        if not (^cg).block_terminated
+            cg_emit(cg, "  br label %")
+            cg_emit_label(cg, "endif", end_lbl)
+            cg_newline(cg)
+        end
+
+        prev_else_lbl = elif_else_lbl
+        cur_elif = (^cur_elif).next
+    end
+
+    # Else block
+    if (^s).if_else != null
+        cg_emit_label(cg, "else", prev_else_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+        (^cg).block_terminated = false
+        cg_gen_stmts(cg, (^s).if_else)
+        else_terminated = (^cg).block_terminated
+        if not else_terminated
+            cg_emit(cg, "  br label %")
+            cg_emit_label(cg, "endif", end_lbl)
+            cg_newline(cg)
+        end
+    else if prev_else_lbl != end_lbl
+        cg_emit_label(cg, "else", prev_else_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+        cg_emit(cg, "  br label %")
+        cg_emit_label(cg, "endif", end_lbl)
+        cg_newline(cg)
+    end
+
+    cg_emit_label(cg, "endif", end_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+    # If both branches terminated (returned), endif has no predecessors
+    # Need unreachable to make it a valid block
+    if then_terminated and else_terminated
+        cg_emit(cg, "  unreachable")
+        cg_newline(cg)
+        (^cg).block_terminated = true
+    else
+        (^cg).block_terminated = false
+    end
+end
+
+fn cg_gen_while(cg: *CodeGen, s: *Stmt) -> void
+    let cond_lbl: i32 = cg_next_label(cg)
+    let body_lbl: i32 = cg_next_label(cg)
+    let end_lbl: i32 = cg_next_label(cg)
+
+    cg_emit(cg, "  br label %")
+    cg_emit_label(cg, "while_cond", cond_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "while_cond", cond_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+    let cond_t: i32 = cg_gen_expr(cg, (^s).while_cond)
+    cg_emit(cg, "  br i1 ")
+    cg_emit_operand(cg, cond_t)
+    cg_emit(cg, ", label %")
+    cg_emit_label(cg, "while_body", body_lbl)
+    cg_emit(cg, ", label %")
+    cg_emit_label(cg, "while_end", end_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "while_body", body_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+    cg_gen_stmts(cg, (^s).while_body)
+    cg_emit(cg, "  br label %")
+    cg_emit_label(cg, "while_cond", cond_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "while_end", end_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+end
+
+fn cg_gen_for(cg: *CodeGen, s: *Stmt) -> void
+    # Allocate loop variable
+    let vid: i32 = cg_next_var(cg)
+    let llvm_name: *i8 = malloc(64)
+    llvm_name[0] = 37
+    let mut i: i32 = 1
+    let mut j: i32 = 0
+    while j < (^s).for_var_len
+        let src: *i8 = (^s).for_var
+        llvm_name[i] = src[j]
+        i = i + 1
+        j = j + 1
+    end
+    llvm_name[i] = 46
+    i = i + 1
+    if vid == 0
+        llvm_name[i] = 48
+        i = i + 1
+    else
+        let mut n: i32 = vid
+        let mut digits: i32 = 0
+        let mut temp: i32 = n
+        while temp > 0
+            digits = digits + 1
+            temp = temp / 10
+        end
+        i = i + digits
+        while n > 0
+            i = i - 1
+            llvm_name[i] = 48 + (n % 10)
+            n = n / 10
+        end
+        i = i + digits
+    end
+    llvm_name[i] = 0
+
+    cg_emit(cg, "  ")
+    cg_emit(cg, llvm_name)
+    cg_emit(cg, " = alloca i32")
+    cg_newline(cg)
+
+    let start_t: i32 = cg_gen_expr(cg, (^s).for_start)
+    cg_emit(cg, "  store i32 ")
+    cg_emit_operand(cg, start_t)
+    cg_emit(cg, ", ptr ")
+    cg_emit(cg, llvm_name)
+    cg_newline(cg)
+
+    let var_type: *Type = malloc(64) as *Type
+    (^var_type).kind = TYPE_I32()
+    cg_add_var(cg, (^s).for_var, (^s).for_var_len, llvm_name, var_type, true)
+
+    let cond_lbl: i32 = cg_next_label(cg)
+    let body_lbl: i32 = cg_next_label(cg)
+    let end_lbl: i32 = cg_next_label(cg)
+
+    cg_emit(cg, "  br label %")
+    cg_emit_label(cg, "for_cond", cond_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "for_cond", cond_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+
+    let cur_t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, cur_t)
+    cg_emit(cg, " = load i32, ptr ")
+    cg_emit(cg, llvm_name)
+    cg_newline(cg)
+
+    let end_t: i32 = cg_gen_expr(cg, (^s).for_end)
+    let cmp_t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, cmp_t)
+    cg_emit(cg, " = icmp slt i32 ")
+    cg_emit_temp(cg, cur_t)
+    cg_emit(cg, ", ")
+    cg_emit_operand(cg, end_t)
+    cg_newline(cg)
+
+    cg_emit(cg, "  br i1 ")
+    cg_emit_temp(cg, cmp_t)
+    cg_emit(cg, ", label %")
+    cg_emit_label(cg, "for_body", body_lbl)
+    cg_emit(cg, ", label %")
+    cg_emit_label(cg, "for_end", end_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "for_body", body_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+    cg_gen_stmts(cg, (^s).for_body)
+
+    # Increment
+    let inc_load: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, inc_load)
+    cg_emit(cg, " = load i32, ptr ")
+    cg_emit(cg, llvm_name)
+    cg_newline(cg)
+    let inc_t: i32 = cg_next_temp(cg)
+    cg_emit(cg, "  ")
+    cg_emit_temp(cg, inc_t)
+    cg_emit(cg, " = add i32 ")
+    cg_emit_temp(cg, inc_load)
+    cg_emit(cg, ", 1")
+    cg_newline(cg)
+    cg_emit(cg, "  store i32 ")
+    cg_emit_temp(cg, inc_t)
+    cg_emit(cg, ", ptr ")
+    cg_emit(cg, llvm_name)
+    cg_newline(cg)
+
+    cg_emit(cg, "  br label %")
+    cg_emit_label(cg, "for_cond", cond_lbl)
+    cg_newline(cg)
+
+    cg_emit_label(cg, "for_end", end_lbl)
+    cg_emit(cg, ":")
+    cg_newline(cg)
+end
+
+fn cg_gen_return(cg: *CodeGen, s: *Stmt) -> void
+    if (^s).return_value == null
+        cg_emit(cg, "  ret void")
+        cg_newline(cg)
+    else
+        let val_t: i32 = cg_gen_expr(cg, (^s).return_value)
+        let val_type: *Type = cg_infer_type(cg, (^s).return_value)
+        let ret_type: *Type = (^cg).current_return_type
+        let mut actual_val: i32 = val_t
+
+        # Convert i64 to i32 if needed
+        if ret_type != null
+            let ret_kind: i32 = (^ret_type).kind
+            let val_kind: i32 = (^val_type).kind
+            if val_kind == TYPE_I64() and ret_kind == TYPE_I32()
+                let conv_t: i32 = cg_next_temp(cg)
+                cg_emit(cg, "  ")
+                cg_emit_temp(cg, conv_t)
+                cg_emit(cg, " = trunc i64 ")
+                cg_emit_operand(cg, val_t)
+                cg_emit(cg, " to i32")
+                cg_newline(cg)
+                actual_val = conv_t
+            end
+        end
+
+        cg_emit(cg, "  ret ")
+        cg_type_to_llvm(cg, ret_type)
+        cg_emit(cg, " ")
+        cg_emit_operand(cg, actual_val)
+        cg_newline(cg)
+    end
+    (^cg).block_terminated = true
+end
+
+fn cg_gen_stmts(cg: *CodeGen, stmts: *StmtList) -> void
+    let mut cur: *StmtList = stmts
+    while cur != null
+        cg_gen_stmt(cg, (^cur).stmt)
+        cur = (^cur).next
+    end
+end
+
+# ============================================================
+# Declaration code generation
+# ============================================================
+
+fn cg_gen_extern(cg: *CodeGen, d: *Decl) -> void
+    cg_emit(cg, "declare ")
+    cg_type_to_llvm(cg, (^d).return_type)
+    cg_emit(cg, " @")
+    cg_emit_n(cg, (^d).name, (^d).name_len)
+    cg_emit(cg, "(")
+
+    let mut first: bool = true
+    let mut cur: *ParamList = (^d).params
+    while cur != null
+        if not first
+            cg_emit(cg, ", ")
+        end
+        first = false
+        let param: *Param = (^cur).param
+        cg_type_to_llvm(cg, (^param).type)
+        cur = (^cur).next
+    end
+
+    cg_emit(cg, ")")
+    cg_newline(cg)
+    cg_newline(cg)
+end
+
+fn cg_gen_function(cg: *CodeGen, d: *Decl) -> void
+    # Reset per-function state
+    (^cg).variables = null
+    (^cg).temp_counter = 0
+    (^cg).var_counter = 0
+    (^cg).current_return_type = (^d).return_type
+
+    cg_emit(cg, "define ")
+    cg_type_to_llvm(cg, (^d).return_type)
+    cg_emit(cg, " @")
+    cg_emit_n(cg, (^d).name, (^d).name_len)
+    cg_emit(cg, "(")
+
+    let mut first: bool = true
+    let mut cur: *ParamList = (^d).params
+    while cur != null
+        if not first
+            cg_emit(cg, ", ")
+        end
+        first = false
+        let param: *Param = (^cur).param
+        cg_type_to_llvm(cg, (^param).type)
+        cg_emit(cg, " %")
+        cg_emit_n(cg, (^param).name, (^param).name_len)
+        cg_emit(cg, ".arg")
+        cur = (^cur).next
+    end
+
+    cg_emit(cg, ") {")
+    cg_newline(cg)
+    cg_emit(cg, "entry:")
+    cg_newline(cg)
+
+    # Allocate parameters
+    cur = (^d).params
+    while cur != null
+        let param: *Param = (^cur).param
+        let vid: i32 = cg_next_var(cg)
+        let llvm_name: *i8 = malloc(64)
+        llvm_name[0] = 37
+        let mut i: i32 = 1
+        let mut j: i32 = 0
+        while j < (^param).name_len
+            let src: *i8 = (^param).name
+            llvm_name[i] = src[j]
+            i = i + 1
+            j = j + 1
+        end
+        llvm_name[i] = 46
+        i = i + 1
+        if vid == 0
+            llvm_name[i] = 48
+            i = i + 1
+        else
+            let mut n: i32 = vid
+            let mut digits: i32 = 0
+            let mut temp: i32 = n
+            while temp > 0
+                digits = digits + 1
+                temp = temp / 10
+            end
+            i = i + digits
+            while n > 0
+                i = i - 1
+                llvm_name[i] = 48 + (n % 10)
+                n = n / 10
+            end
+            i = i + digits
+        end
+        llvm_name[i] = 0
+
+        cg_emit(cg, "  ")
+        cg_emit(cg, llvm_name)
+        cg_emit(cg, " = alloca ")
+        cg_type_to_llvm(cg, (^param).type)
+        cg_newline(cg)
+
+        cg_emit(cg, "  store ")
+        cg_type_to_llvm(cg, (^param).type)
+        cg_emit(cg, " %")
+        cg_emit_n(cg, (^param).name, (^param).name_len)
+        cg_emit(cg, ".arg, ptr ")
+        cg_emit(cg, llvm_name)
+        cg_newline(cg)
+
+        cg_add_var(cg, (^param).name, (^param).name_len, llvm_name, (^param).type, true)
+        cur = (^cur).next
+    end
+
+    # Generate body
+    cg_gen_stmts(cg, (^d).body)
+
+    # Add implicit return for void functions
+    if (^(^d).return_type).kind == TYPE_VOID()
+        cg_emit(cg, "  ret void")
+        cg_newline(cg)
+    end
+
+    cg_emit(cg, "}")
+    cg_newline(cg)
+    cg_newline(cg)
+end
+
+fn cg_gen_struct(cg: *CodeGen, d: *Decl) -> void
+    cg_emit(cg, "%")
+    cg_emit_n(cg, (^d).name, (^d).name_len)
+    cg_emit(cg, " = type { ")
+
+    let mut first: bool = true
+    let mut cur: *StructFieldList = (^d).fields
+    while cur != null
+        if not first
+            cg_emit(cg, ", ")
+        end
+        first = false
+        let field: *StructField = (^cur).field
+        cg_type_to_llvm(cg, (^field).type)
+        cur = (^cur).next
+    end
+
+    cg_emit(cg, " }")
+    cg_newline(cg)
+end
+
+fn cg_gen_program(cg: *CodeGen, prog: *Program) -> void
+    # Header
+    cg_emit(cg, "; ALLM Compiler Output")
+    cg_newline(cg)
+    cg_emit(cg, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"")
+    cg_newline(cg)
+    cg_emit(cg, "target triple = \"x86_64-unknown-linux-gnu\"")
+    cg_newline(cg)
+    cg_newline(cg)
+
+    # First pass: collect declarations
+    let mut cur: *DeclList = (^prog).decls
+    while cur != null
+        let d: *Decl = (^cur).decl
+        if (^d).kind == DECL_FUNCTION()
+            cg_add_func(cg, (^d).name, (^d).name_len, (^d).params, (^d).return_type, false)
+        else if (^d).kind == DECL_EXTERN()
+            cg_add_func(cg, (^d).name, (^d).name_len, (^d).params, (^d).return_type, true)
+        else if (^d).kind == DECL_STRUCT()
+            cg_add_struct(cg, (^d).name, (^d).name_len, (^d).fields)
+        end
+        cur = (^cur).next
+    end
+
+    # Generate struct types
+    cur = (^prog).decls
+    while cur != null
+        let d: *Decl = (^cur).decl
+        if (^d).kind == DECL_STRUCT()
+            cg_gen_struct(cg, d)
+        end
+        cur = (^cur).next
+    end
+    cg_newline(cg)
+
+    # Generate externs
+    cur = (^prog).decls
+    while cur != null
+        let d: *Decl = (^cur).decl
+        if (^d).kind == DECL_EXTERN()
+            cg_gen_extern(cg, d)
+        end
+        cur = (^cur).next
+    end
+
+    # Generate functions
+    cur = (^prog).decls
+    while cur != null
+        let d: *Decl = (^cur).decl
+        if (^d).kind == DECL_FUNCTION()
+            cg_gen_function(cg, d)
+        end
+        cur = (^cur).next
+    end
+
+    # Generate string constants
+    if (^cg).strings != null
+        cg_newline(cg)
+        cg_emit(cg, "; String constants")
+        cg_newline(cg)
+        let mut str_cur: *StringList = (^cg).strings
+        while str_cur != null
+            let sc: *StringConst = (^str_cur).sc
+
+            # First pass: count actual length (processing escapes)
+            let mut actual_len: i32 = 0
+            let mut j: i32 = 0
+            while j < (^sc).value_len
+                if (^sc).value[j] == 92 and j + 1 < (^sc).value_len
+                    # Escape sequence - counts as 1 char
+                    j = j + 2
+                else
+                    j = j + 1
+                end
+                actual_len = actual_len + 1
+            end
+
+            cg_emit(cg, (^sc).name)
+            cg_emit(cg, " = private unnamed_addr constant [")
+            cg_emit_int(cg, actual_len + 1)
+            cg_emit(cg, " x i8] c\"")
+
+            # Emit escaped string, processing source escape sequences
+            let mut i: i32 = 0
+            while i < (^sc).value_len
+                let c: i32 = (^sc).value[i]
+                if c == 92 and i + 1 < (^sc).value_len
+                    # Escape sequence in source
+                    let next: i32 = (^sc).value[i + 1]
+                    if next == 110
+                        # \n -> newline
+                        cg_emit(cg, "\\0A")
+                    else if next == 114
+                        # \r -> carriage return
+                        cg_emit(cg, "\\0D")
+                    else if next == 116
+                        # \t -> tab
+                        cg_emit(cg, "\\09")
+                    else if next == 34
+                        # \" -> quote
+                        cg_emit(cg, "\\22")
+                    else if next == 92
+                        # \\ -> backslash
+                        cg_emit(cg, "\\5C")
+                    else if next == 48
+                        # \0 -> null
+                        cg_emit(cg, "\\00")
+                    else
+                        # Unknown escape, emit both chars as-is
+                        cg_emit(cg, "\\5C")
+                        cg_emit_char(cg, next)
+                    end
+                    i = i + 2
+                else if c == 10
+                    cg_emit(cg, "\\0A")
+                    i = i + 1
+                else if c == 13
+                    cg_emit(cg, "\\0D")
+                    i = i + 1
+                else if c == 9
+                    cg_emit(cg, "\\09")
+                    i = i + 1
+                else if c == 34
+                    cg_emit(cg, "\\22")
+                    i = i + 1
+                else if c == 92
+                    cg_emit(cg, "\\5C")
+                    i = i + 1
+                else
+                    cg_emit_char(cg, c)
+                    i = i + 1
+                end
+            end
+            cg_emit(cg, "\\00\"")
+            cg_newline(cg)
+            str_cur = (^str_cur).next
+        end
+    end
+end
+
+fn cg_get_output(cg: *CodeGen) -> *i8
+    return (^(^cg).output).data
+end
+
+# Codegen module - no main for linking

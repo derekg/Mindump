@@ -1,0 +1,1045 @@
+# ALLM Bootstrap Compiler - Parser
+# Parses tokens into an AST
+
+# Memory management
+extern fn malloc(size: i64) -> *i8
+extern fn realloc(ptr: *i8, size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+
+# String functions
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+
+# I/O
+extern fn puts(s: *i8) -> i32
+extern fn putchar(c: i32) -> i32
+extern fn printf(fmt: *i8) -> i32
+extern fn exit(code: i32) -> void
+
+# Token constants from lexer (extern declarations)
+extern fn TOK_EOF() -> i32
+extern fn TOK_INTEGER() -> i32
+extern fn TOK_STRING() -> i32
+extern fn TOK_IDENT() -> i32
+extern fn TOK_FN() -> i32
+extern fn TOK_LET() -> i32
+extern fn TOK_MUT() -> i32
+extern fn TOK_IF() -> i32
+extern fn TOK_ELSE() -> i32
+extern fn TOK_WHILE() -> i32
+extern fn TOK_FOR() -> i32
+extern fn TOK_IN() -> i32
+extern fn TOK_RETURN() -> i32
+extern fn TOK_END() -> i32
+extern fn TOK_STRUCT() -> i32
+extern fn TOK_AND() -> i32
+extern fn TOK_OR() -> i32
+extern fn TOK_NOT() -> i32
+extern fn TOK_TRUE() -> i32
+extern fn TOK_FALSE() -> i32
+extern fn TOK_NULL() -> i32
+extern fn TOK_EXTERN() -> i32
+extern fn TOK_AS() -> i32
+extern fn TOK_I8() -> i32
+extern fn TOK_I32() -> i32
+extern fn TOK_I64() -> i32
+extern fn TOK_U8() -> i32
+extern fn TOK_F32() -> i32
+extern fn TOK_F64() -> i32
+extern fn TOK_BOOL() -> i32
+extern fn TOK_VOID() -> i32
+extern fn TOK_STR() -> i32
+extern fn TOK_PLUS() -> i32
+extern fn TOK_MINUS() -> i32
+extern fn TOK_STAR() -> i32
+extern fn TOK_SLASH() -> i32
+extern fn TOK_PERCENT() -> i32
+extern fn TOK_EQ() -> i32
+extern fn TOK_NE() -> i32
+extern fn TOK_LT() -> i32
+extern fn TOK_GT() -> i32
+extern fn TOK_LE() -> i32
+extern fn TOK_GE() -> i32
+extern fn TOK_ASSIGN() -> i32
+extern fn TOK_ARROW() -> i32
+extern fn TOK_DOTDOT() -> i32
+extern fn TOK_AMP() -> i32
+extern fn TOK_CARET() -> i32
+extern fn TOK_COLON() -> i32
+extern fn TOK_COMMA() -> i32
+extern fn TOK_DOT() -> i32
+extern fn TOK_LPAREN() -> i32
+extern fn TOK_RPAREN() -> i32
+extern fn TOK_LBRACE() -> i32
+extern fn TOK_RBRACE() -> i32
+extern fn TOK_LBRACKET() -> i32
+extern fn TOK_RBRACKET() -> i32
+
+# Token structure (from lexer)
+struct Token
+    type: i32
+    value: *i8
+    len: i32
+    line: i32
+    col: i32
+end
+
+# Token array for parser
+struct TokenArray
+    tokens: *Token
+    count: i32
+    capacity: i32
+end
+
+fn token_array_new() -> *TokenArray
+    let arr: *TokenArray = malloc(32) as *TokenArray
+    # Token is ~24-32 bytes, allocate 64 * 40 = 2560 bytes to be safe
+    (^arr).tokens = malloc(2560) as *Token
+    (^arr).count = 0
+    (^arr).capacity = 64
+    return arr
+end
+
+fn token_array_push(arr: *TokenArray, tok: Token) -> void
+    if (^arr).count >= (^arr).capacity
+        let new_cap: i32 = (^arr).capacity * 2
+        let new_tokens: *Token = malloc(new_cap * 40) as *Token
+        let i: i32 = 0
+        while i < (^arr).count
+            let old_ptr: *Token = (^arr).tokens + i
+            let new_ptr: *Token = new_tokens + i
+            (^new_ptr).type = (^old_ptr).type
+            (^new_ptr).value = (^old_ptr).value
+            (^new_ptr).len = (^old_ptr).len
+            (^new_ptr).line = (^old_ptr).line
+            (^new_ptr).col = (^old_ptr).col
+            i = i + 1
+        end
+        free((^arr).tokens as *i8)
+        (^arr).tokens = new_tokens
+        (^arr).capacity = new_cap
+    end
+    let ptr: *Token = (^arr).tokens + (^arr).count
+    (^ptr).type = tok.type
+    (^ptr).value = tok.value
+    (^ptr).len = tok.len
+    (^ptr).line = tok.line
+    (^ptr).col = tok.col
+    (^arr).count = (^arr).count + 1
+end
+
+fn token_array_get(arr: *TokenArray, index: i32) -> *Token
+    let ptr: *Token = (^arr).tokens + index
+    return ptr
+end
+
+# ============================================================
+# Type kind constants (extern from ast.allm)
+# ============================================================
+extern fn TYPE_I8() -> i32
+extern fn TYPE_I32() -> i32
+extern fn TYPE_I64() -> i32
+extern fn TYPE_U8() -> i32
+extern fn TYPE_F32() -> i32
+extern fn TYPE_F64() -> i32
+extern fn TYPE_BOOL() -> i32
+extern fn TYPE_VOID() -> i32
+extern fn TYPE_STR() -> i32
+extern fn TYPE_NAMED() -> i32
+extern fn TYPE_PTR() -> i32
+extern fn TYPE_ARRAY() -> i32
+
+# Type structure
+struct Type
+    kind: i32
+    name: *i8
+    name_len: i32
+    inner: *Type
+    element: *Type
+    size: i32
+end
+
+# Type construction functions (extern from ast.allm)
+extern fn type_new(kind: i32) -> *Type
+extern fn type_new_ptr(inner: *Type) -> *Type
+extern fn type_new_named(name: *i8, len: i32) -> *Type
+extern fn type_new_array(element: *Type, size: i32) -> *Type
+
+# ============================================================
+# Parser state
+# ============================================================
+struct Parser
+    tokens: *TokenArray
+    pos: i32
+end
+
+fn parser_new(tokens: *TokenArray) -> *Parser
+    let p: *Parser = malloc(32) as *Parser
+    (^p).tokens = tokens
+    (^p).pos = 0
+    return p
+end
+
+fn parser_peek(p: *Parser) -> *Token
+    let arr: *TokenArray = (^p).tokens
+    return token_array_get(arr, (^p).pos)
+end
+
+fn parser_previous(p: *Parser) -> *Token
+    let arr: *TokenArray = (^p).tokens
+    return token_array_get(arr, (^p).pos - 1)
+end
+
+fn parser_is_at_end(p: *Parser) -> bool
+    let tok: *Token = parser_peek(p)
+    return (^tok).type == TOK_EOF()
+end
+
+fn parser_advance(p: *Parser) -> *Token
+    if not parser_is_at_end(p)
+        (^p).pos = (^p).pos + 1
+    end
+    return parser_previous(p)
+end
+
+fn parser_check(p: *Parser, type: i32) -> bool
+    if parser_is_at_end(p)
+        return false
+    end
+    let tok: *Token = parser_peek(p)
+    return (^tok).type == type
+end
+
+fn parser_match(p: *Parser, type: i32) -> bool
+    if parser_check(p, type)
+        parser_advance(p)
+        return true
+    end
+    return false
+end
+
+fn parser_error(p: *Parser, msg: *i8) -> void
+    let tok: *Token = parser_peek(p)
+    puts("Parse error at line ")
+    puts(msg)
+    exit(1)
+end
+
+fn parser_expect(p: *Parser, type: i32, msg: *i8) -> *Token
+    if parser_check(p, type)
+        return parser_advance(p)
+    end
+    parser_error(p, msg)
+    return null
+end
+
+# ============================================================
+# Expression kind constants (extern from ast.allm)
+# ============================================================
+extern fn EXPR_INTEGER() -> i32
+extern fn EXPR_STRING() -> i32
+extern fn EXPR_BOOL() -> i32
+extern fn EXPR_NULL() -> i32
+extern fn EXPR_IDENT() -> i32
+extern fn EXPR_BINARY() -> i32
+extern fn EXPR_UNARY() -> i32
+extern fn EXPR_CALL() -> i32
+extern fn EXPR_MEMBER() -> i32
+extern fn EXPR_STRUCT_LIT() -> i32
+extern fn EXPR_INDEX() -> i32
+extern fn EXPR_ADDR_OF() -> i32
+extern fn EXPR_DEREF() -> i32
+extern fn EXPR_CAST() -> i32
+
+# Binary operators (extern from ast.allm)
+extern fn OP_ADD() -> i32
+extern fn OP_SUB() -> i32
+extern fn OP_MUL() -> i32
+extern fn OP_DIV() -> i32
+extern fn OP_MOD() -> i32
+extern fn OP_EQ() -> i32
+extern fn OP_NE() -> i32
+extern fn OP_LT() -> i32
+extern fn OP_GT() -> i32
+extern fn OP_LE() -> i32
+extern fn OP_GE() -> i32
+extern fn OP_AND() -> i32
+extern fn OP_OR() -> i32
+
+# Unary operators (extern from ast.allm)
+extern fn UNOP_NOT() -> i32
+extern fn UNOP_NEG() -> i32
+
+# Expression structure
+struct Expr
+    kind: i32
+    line: i32
+    col: i32
+    int_value: i64
+    str_value: *i8
+    str_len: i32
+    bool_value: bool
+    op: i32
+    left: *Expr
+    right: *Expr
+    unary_op: i32
+    operand: *Expr
+    args: *ExprList
+    object: *Expr
+    field: *i8
+    field_len: i32
+    struct_name: *i8
+    struct_name_len: i32
+    struct_fields: *FieldInitList
+    index_obj: *Expr
+    index: *Expr
+    cast_type: *Type
+end
+
+struct ExprList
+    expr: *Expr
+    next: *ExprList
+end
+
+struct FieldInit
+    name: *i8
+    name_len: i32
+    value: *Expr
+end
+
+struct FieldInitList
+    field: *FieldInit
+    next: *FieldInitList
+end
+
+# Expression construction functions (extern from ast.allm)
+extern fn expr_new(kind: i32, line: i32, col: i32) -> *Expr
+extern fn expr_integer(value: i64, line: i32, col: i32) -> *Expr
+extern fn expr_string(value: *i8, len: i32, line: i32, col: i32) -> *Expr
+extern fn expr_bool(value: bool, line: i32, col: i32) -> *Expr
+extern fn expr_null(line: i32, col: i32) -> *Expr
+extern fn expr_ident(name: *i8, len: i32, line: i32, col: i32) -> *Expr
+extern fn expr_binary(op: i32, left: *Expr, right: *Expr, line: i32, col: i32) -> *Expr
+extern fn expr_unary(op: i32, operand: *Expr, line: i32, col: i32) -> *Expr
+extern fn expr_call(callee: *i8, callee_len: i32, args: *ExprList, line: i32, col: i32) -> *Expr
+extern fn expr_member(object: *Expr, field: *i8, field_len: i32, line: i32, col: i32) -> *Expr
+extern fn expr_index(object: *Expr, index: *Expr, line: i32, col: i32) -> *Expr
+extern fn expr_addr_of(operand: *Expr, line: i32, col: i32) -> *Expr
+extern fn expr_deref(operand: *Expr, line: i32, col: i32) -> *Expr
+extern fn expr_cast(operand: *Expr, target: *Type, line: i32, col: i32) -> *Expr
+extern fn expr_list_push(list: *ExprList, expr: *Expr) -> *ExprList
+
+# ============================================================
+# Statement structures (extern from ast.allm)
+# ============================================================
+extern fn STMT_LET() -> i32
+extern fn STMT_ASSIGN() -> i32
+extern fn STMT_IF() -> i32
+extern fn STMT_WHILE() -> i32
+extern fn STMT_FOR() -> i32
+extern fn STMT_RETURN() -> i32
+extern fn STMT_EXPR() -> i32
+
+struct Stmt
+    kind: i32
+    line: i32
+    col: i32
+    let_name: *i8
+    let_name_len: i32
+    let_mutable: bool
+    let_type: *Type
+    let_init: *Expr
+    assign_target: *Expr
+    assign_value: *Expr
+    if_cond: *Expr
+    if_then: *StmtList
+    if_else_ifs: *ElseIfList
+    if_else: *StmtList
+    while_cond: *Expr
+    while_body: *StmtList
+    for_var: *i8
+    for_var_len: i32
+    for_start: *Expr
+    for_end: *Expr
+    for_body: *StmtList
+    return_value: *Expr
+    expr_stmt: *Expr
+end
+
+struct StmtList
+    stmt: *Stmt
+    next: *StmtList
+end
+
+struct ElseIf
+    cond: *Expr
+    body: *StmtList
+end
+
+struct ElseIfList
+    elif: *ElseIf
+    next: *ElseIfList
+end
+
+# Statement construction functions (extern from ast.allm)
+extern fn stmt_new(kind: i32, line: i32, col: i32) -> *Stmt
+extern fn stmt_list_push(list: *StmtList, stmt: *Stmt) -> *StmtList
+
+# ============================================================
+# Declaration structures (extern from ast.allm)
+# ============================================================
+extern fn DECL_FUNCTION() -> i32
+extern fn DECL_STRUCT() -> i32
+extern fn DECL_EXTERN() -> i32
+
+struct Param
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct ParamList
+    param: *Param
+    next: *ParamList
+end
+
+struct StructField
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct StructFieldList
+    field: *StructField
+    next: *StructFieldList
+end
+
+struct Decl
+    kind: i32
+    line: i32
+    col: i32
+    name: *i8
+    name_len: i32
+    params: *ParamList
+    return_type: *Type
+    body: *StmtList
+    fields: *StructFieldList
+end
+
+struct DeclList
+    decl: *Decl
+    next: *DeclList
+end
+
+# Declaration and related construction functions (extern from ast.allm)
+extern fn decl_new(kind: i32, line: i32, col: i32) -> *Decl
+extern fn decl_list_push(list: *DeclList, decl: *Decl) -> *DeclList
+extern fn param_new(name: *i8, name_len: i32, typ: *Type) -> *Param
+extern fn param_list_push(list: *ParamList, param: *Param) -> *ParamList
+extern fn struct_field_new(name: *i8, name_len: i32, typ: *Type) -> *StructField
+extern fn struct_field_list_push(list: *StructFieldList, field: *StructField) -> *StructFieldList
+extern fn program_new() -> *Program
+
+struct Program
+    decls: *DeclList
+end
+
+# ============================================================
+# Forward declarations for mutual recursion
+# ============================================================
+
+# Forward declare expression parsing
+fn parse_expression(p: *Parser) -> *Expr
+    return parse_or_expr(p)
+end
+
+fn parse_or_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_and_expr(p)
+    while parser_match(p, TOK_OR())
+        let tok: *Token = parser_previous(p)
+        let right: *Expr = parse_and_expr(p)
+        left = expr_binary(OP_OR(), left, right, (^tok).line, (^tok).col)
+    end
+    return left
+end
+
+fn parse_and_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_equality_expr(p)
+    while parser_match(p, TOK_AND())
+        let tok: *Token = parser_previous(p)
+        let right: *Expr = parse_equality_expr(p)
+        left = expr_binary(OP_AND(), left, right, (^tok).line, (^tok).col)
+    end
+    return left
+end
+
+fn parse_equality_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_comparison_expr(p)
+    let mut done: bool = false
+    while not done
+        let tok: *Token = parser_peek(p)
+        if parser_match(p, TOK_EQ())
+            let right: *Expr = parse_comparison_expr(p)
+            left = expr_binary(OP_EQ(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_NE())
+            let right: *Expr = parse_comparison_expr(p)
+            left = expr_binary(OP_NE(), left, right, (^tok).line, (^tok).col)
+        else
+            done = true
+        end
+    end
+    return left
+end
+
+fn parse_comparison_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_add_expr(p)
+    let mut done: bool = false
+    while not done
+        let tok: *Token = parser_peek(p)
+        if parser_match(p, TOK_LT())
+            let right: *Expr = parse_add_expr(p)
+            left = expr_binary(OP_LT(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_GT())
+            let right: *Expr = parse_add_expr(p)
+            left = expr_binary(OP_GT(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_LE())
+            let right: *Expr = parse_add_expr(p)
+            left = expr_binary(OP_LE(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_GE())
+            let right: *Expr = parse_add_expr(p)
+            left = expr_binary(OP_GE(), left, right, (^tok).line, (^tok).col)
+        else
+            done = true
+        end
+    end
+    return left
+end
+
+fn parse_add_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_mul_expr(p)
+    let mut done: bool = false
+    while not done
+        let tok: *Token = parser_peek(p)
+        if parser_match(p, TOK_PLUS())
+            let right: *Expr = parse_mul_expr(p)
+            left = expr_binary(OP_ADD(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_MINUS())
+            let right: *Expr = parse_mul_expr(p)
+            left = expr_binary(OP_SUB(), left, right, (^tok).line, (^tok).col)
+        else
+            done = true
+        end
+    end
+    return left
+end
+
+fn parse_mul_expr(p: *Parser) -> *Expr
+    let mut left: *Expr = parse_unary_expr(p)
+    let mut done: bool = false
+    while not done
+        let tok: *Token = parser_peek(p)
+        if parser_match(p, TOK_STAR())
+            let right: *Expr = parse_unary_expr(p)
+            left = expr_binary(OP_MUL(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_SLASH())
+            let right: *Expr = parse_unary_expr(p)
+            left = expr_binary(OP_DIV(), left, right, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_PERCENT())
+            let right: *Expr = parse_unary_expr(p)
+            left = expr_binary(OP_MOD(), left, right, (^tok).line, (^tok).col)
+        else
+            done = true
+        end
+    end
+    return left
+end
+
+fn parse_unary_expr(p: *Parser) -> *Expr
+    let tok: *Token = parser_peek(p)
+    if parser_match(p, TOK_NOT())
+        let operand: *Expr = parse_unary_expr(p)
+        return expr_unary(UNOP_NOT(), operand, (^tok).line, (^tok).col)
+    end
+    if parser_match(p, TOK_MINUS())
+        let operand: *Expr = parse_unary_expr(p)
+        return expr_unary(UNOP_NEG(), operand, (^tok).line, (^tok).col)
+    end
+    if parser_match(p, TOK_AMP())
+        let operand: *Expr = parse_unary_expr(p)
+        return expr_addr_of(operand, (^tok).line, (^tok).col)
+    end
+    if parser_match(p, TOK_CARET())
+        let operand: *Expr = parse_unary_expr(p)
+        return expr_deref(operand, (^tok).line, (^tok).col)
+    end
+    return parse_postfix_expr(p)
+end
+
+fn parse_postfix_expr(p: *Parser) -> *Expr
+    let mut expr: *Expr = parse_primary_expr(p)
+    let mut done: bool = false
+    while not done
+        let tok: *Token = parser_peek(p)
+        if parser_match(p, TOK_DOT())
+            let field_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected field name")
+            expr = expr_member(expr, (^field_tok).value, (^field_tok).len, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_LBRACKET())
+            let index: *Expr = parse_expression(p)
+            parser_expect(p, TOK_RBRACKET(), "Expected ]")
+            expr = expr_index(expr, index, (^tok).line, (^tok).col)
+        else if parser_match(p, TOK_AS())
+            let target: *Type = parse_type(p)
+            expr = expr_cast(expr, target, (^tok).line, (^tok).col)
+        else
+            done = true
+        end
+    end
+    return expr
+end
+
+fn parse_type(p: *Parser) -> *Type
+    if parser_match(p, TOK_I8())
+        return type_new(TYPE_I8())
+    end
+    if parser_match(p, TOK_I32())
+        return type_new(TYPE_I32())
+    end
+    if parser_match(p, TOK_I64())
+        return type_new(TYPE_I64())
+    end
+    if parser_match(p, TOK_U8())
+        return type_new(TYPE_U8())
+    end
+    if parser_match(p, TOK_F32())
+        return type_new(TYPE_F32())
+    end
+    if parser_match(p, TOK_F64())
+        return type_new(TYPE_F64())
+    end
+    if parser_match(p, TOK_BOOL())
+        return type_new(TYPE_BOOL())
+    end
+    if parser_match(p, TOK_VOID())
+        return type_new(TYPE_VOID())
+    end
+    if parser_match(p, TOK_STR())
+        return type_new(TYPE_STR())
+    end
+    if parser_match(p, TOK_STAR())
+        let inner: *Type = parse_type(p)
+        return type_new_ptr(inner)
+    end
+    if parser_check(p, TOK_IDENT())
+        let tok: *Token = parser_advance(p)
+        return type_new_named((^tok).value, (^tok).len)
+    end
+    parser_error(p, "Expected type")
+    return null
+end
+
+fn atoi(s: *i8, len: i32) -> i64
+    let mut result: i64 = 0
+    let mut i: i32 = 0
+    while i < len
+        let c: i32 = s[i]
+        if c >= 48 and c <= 57
+            result = result * 10 + (c - 48)
+        end
+        i = i + 1
+    end
+    return result
+end
+
+fn parse_primary_expr(p: *Parser) -> *Expr
+    let tok: *Token = parser_peek(p)
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+
+    if parser_check(p, TOK_INTEGER())
+        parser_advance(p)
+        let value: i64 = atoi((^tok).value, (^tok).len)
+        return expr_integer(value, line, col)
+    end
+
+    if parser_check(p, TOK_STRING())
+        parser_advance(p)
+        return expr_string((^tok).value, (^tok).len, line, col)
+    end
+
+    if parser_match(p, TOK_TRUE())
+        return expr_bool(true, line, col)
+    end
+
+    if parser_match(p, TOK_FALSE())
+        return expr_bool(false, line, col)
+    end
+
+    if parser_match(p, TOK_NULL())
+        return expr_null(line, col)
+    end
+
+    if parser_match(p, TOK_LPAREN())
+        let expr: *Expr = parse_expression(p)
+        parser_expect(p, TOK_RPAREN(), "Expected )")
+        return expr
+    end
+
+    if parser_check(p, TOK_IDENT())
+        let ident_tok: *Token = parser_advance(p)
+        let name: *i8 = (^ident_tok).value
+        let name_len: i32 = (^ident_tok).len
+        let ident_line: i32 = (^ident_tok).line
+
+        # Check for function call - only if ( is on same line
+        let next: *Token = parser_peek(p)
+        if parser_check(p, TOK_LPAREN()) and (^next).line == ident_line
+            parser_advance(p)
+            let mut args: *ExprList = null
+            if not parser_check(p, TOK_RPAREN())
+                let first_arg: *Expr = parse_expression(p)
+                args = expr_list_push(args, first_arg)
+                while parser_match(p, TOK_COMMA())
+                    let arg: *Expr = parse_expression(p)
+                    args = expr_list_push(args, arg)
+                end
+            end
+            parser_expect(p, TOK_RPAREN(), "Expected )")
+            return expr_call(name, name_len, args, line, col)
+        end
+
+        # Check for struct literal - only if { is on same line
+        if parser_check(p, TOK_LBRACE()) and (^next).line == ident_line
+            parser_advance(p)
+            let mut fields: *FieldInitList = null
+            if not parser_check(p, TOK_RBRACE())
+                # Parse first field
+                let f_name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected field name")
+                parser_expect(p, TOK_COLON(), "Expected :")
+                let f_value: *Expr = parse_expression(p)
+                let f_init: *FieldInit = malloc(32) as *FieldInit
+                (^f_init).name = (^f_name_tok).value
+                (^f_init).name_len = (^f_name_tok).len
+                (^f_init).value = f_value
+                let f_node: *FieldInitList = malloc(24) as *FieldInitList
+                (^f_node).field = f_init
+                (^f_node).next = null
+                fields = f_node
+
+                while parser_match(p, TOK_COMMA())
+                    let fn_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected field name")
+                    parser_expect(p, TOK_COLON(), "Expected :")
+                    let fv: *Expr = parse_expression(p)
+                    let fi: *FieldInit = malloc(32) as *FieldInit
+                    (^fi).name = (^fn_tok).value
+                    (^fi).name_len = (^fn_tok).len
+                    (^fi).value = fv
+                    let fnode: *FieldInitList = malloc(24) as *FieldInitList
+                    (^fnode).field = fi
+                    (^fnode).next = null
+                    # Append to list
+                    let mut cur: *FieldInitList = fields
+                    while (^cur).next != null
+                        cur = (^cur).next
+                    end
+                    (^cur).next = fnode
+                end
+            end
+            parser_expect(p, TOK_RBRACE(), "Expected }")
+            let e: *Expr = expr_new(EXPR_STRUCT_LIT(), line, col)
+            (^e).struct_name = name
+            (^e).struct_name_len = name_len
+            (^e).struct_fields = fields
+            return e
+        end
+
+        return expr_ident(name, name_len, line, col)
+    end
+
+    parser_error(p, "Expected expression")
+    return null
+end
+
+# ============================================================
+# Statement parsing
+# ============================================================
+
+fn parse_block(p: *Parser) -> *StmtList
+    let mut stmts: *StmtList = null
+    while not parser_check(p, TOK_END()) and not parser_check(p, TOK_ELSE()) and not parser_is_at_end(p)
+        let stmt: *Stmt = parse_statement(p)
+        stmts = stmt_list_push(stmts, stmt)
+    end
+    return stmts
+end
+
+fn parse_statement(p: *Parser) -> *Stmt
+    if parser_check(p, TOK_LET())
+        return parse_let_stmt(p)
+    end
+    if parser_check(p, TOK_IF())
+        return parse_if_stmt(p)
+    end
+    if parser_check(p, TOK_WHILE())
+        return parse_while_stmt(p)
+    end
+    if parser_check(p, TOK_FOR())
+        return parse_for_stmt(p)
+    end
+    if parser_check(p, TOK_RETURN())
+        return parse_return_stmt(p)
+    end
+    return parse_assign_or_expr_stmt(p)
+end
+
+fn parse_let_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_expect(p, TOK_LET(), "Expected let")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let mut mutable: bool = false
+    if parser_match(p, TOK_MUT())
+        mutable = true
+    end
+    let name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected variable name")
+    parser_expect(p, TOK_COLON(), "Expected :")
+    let typ: *Type = parse_type(p)
+    parser_expect(p, TOK_ASSIGN(), "Expected =")
+    let init: *Expr = parse_expression(p)
+
+    let s: *Stmt = stmt_new(STMT_LET(), line, col)
+    (^s).let_name = (^name_tok).value
+    (^s).let_name_len = (^name_tok).len
+    (^s).let_mutable = mutable
+    (^s).let_type = typ
+    (^s).let_init = init
+    return s
+end
+
+fn parse_if_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_expect(p, TOK_IF(), "Expected if")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let cond: *Expr = parse_expression(p)
+    let then_block: *StmtList = parse_block(p)
+
+    let mut else_ifs: *ElseIfList = null
+    let mut else_block: *StmtList = null
+
+    while parser_match(p, TOK_ELSE())
+        if parser_match(p, TOK_IF())
+            let elif_cond: *Expr = parse_expression(p)
+            let elif_body: *StmtList = parse_block(p)
+            let elif: *ElseIf = malloc(24) as *ElseIf
+            (^elif).cond = elif_cond
+            (^elif).body = elif_body
+            let elif_node: *ElseIfList = malloc(24) as *ElseIfList
+            (^elif_node).elif = elif
+            (^elif_node).next = null
+            if else_ifs == null
+                else_ifs = elif_node
+            else
+                let mut cur: *ElseIfList = else_ifs
+                while (^cur).next != null
+                    cur = (^cur).next
+                end
+                (^cur).next = elif_node
+            end
+        else
+            else_block = parse_block(p)
+        end
+    end
+
+    parser_expect(p, TOK_END(), "Expected end")
+
+    let s: *Stmt = stmt_new(STMT_IF(), line, col)
+    (^s).if_cond = cond
+    (^s).if_then = then_block
+    (^s).if_else_ifs = else_ifs
+    (^s).if_else = else_block
+    return s
+end
+
+fn parse_while_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_expect(p, TOK_WHILE(), "Expected while")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let cond: *Expr = parse_expression(p)
+    let body: *StmtList = parse_block(p)
+    parser_expect(p, TOK_END(), "Expected end")
+
+    let s: *Stmt = stmt_new(STMT_WHILE(), line, col)
+    (^s).while_cond = cond
+    (^s).while_body = body
+    return s
+end
+
+fn parse_for_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_expect(p, TOK_FOR(), "Expected for")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let var_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected loop variable")
+    parser_expect(p, TOK_IN(), "Expected in")
+    let start_expr: *Expr = parse_expression(p)
+    parser_expect(p, TOK_DOTDOT(), "Expected ..")
+    let end_expr: *Expr = parse_expression(p)
+    let body: *StmtList = parse_block(p)
+    parser_expect(p, TOK_END(), "Expected end")
+
+    let s: *Stmt = stmt_new(STMT_FOR(), line, col)
+    (^s).for_var = (^var_tok).value
+    (^s).for_var_len = (^var_tok).len
+    (^s).for_start = start_expr
+    (^s).for_end = end_expr
+    (^s).for_body = body
+    return s
+end
+
+fn parse_return_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_expect(p, TOK_RETURN(), "Expected return")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+
+    let mut value: *Expr = null
+    if not parser_check(p, TOK_END()) and not parser_check(p, TOK_ELSE()) and not parser_check(p, TOK_LET()) and not parser_check(p, TOK_IF()) and not parser_check(p, TOK_WHILE()) and not parser_check(p, TOK_FOR()) and not parser_check(p, TOK_RETURN()) and not parser_is_at_end(p)
+        value = parse_expression(p)
+    end
+
+    let s: *Stmt = stmt_new(STMT_RETURN(), line, col)
+    (^s).return_value = value
+    return s
+end
+
+fn parse_assign_or_expr_stmt(p: *Parser) -> *Stmt
+    let tok: *Token = parser_peek(p)
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let expr: *Expr = parse_expression(p)
+
+    if parser_match(p, TOK_ASSIGN())
+        let value: *Expr = parse_expression(p)
+        let s: *Stmt = stmt_new(STMT_ASSIGN(), line, col)
+        (^s).assign_target = expr
+        (^s).assign_value = value
+        return s
+    end
+
+    let s: *Stmt = stmt_new(STMT_EXPR(), line, col)
+    (^s).expr_stmt = expr
+    return s
+end
+
+# ============================================================
+# Declaration parsing
+# ============================================================
+
+fn parse_parameters(p: *Parser) -> *ParamList
+    let mut params: *ParamList = null
+    if not parser_check(p, TOK_RPAREN())
+        let name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected parameter name")
+        parser_expect(p, TOK_COLON(), "Expected :")
+        let typ: *Type = parse_type(p)
+        let param: *Param = param_new((^name_tok).value, (^name_tok).len, typ)
+        params = param_list_push(params, param)
+
+        while parser_match(p, TOK_COMMA())
+            let n_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected parameter name")
+            parser_expect(p, TOK_COLON(), "Expected :")
+            let t: *Type = parse_type(p)
+            let par: *Param = param_new((^n_tok).value, (^n_tok).len, t)
+            params = param_list_push(params, par)
+        end
+    end
+    return params
+end
+
+fn parse_function_decl(p: *Parser) -> *Decl
+    let tok: *Token = parser_expect(p, TOK_FN(), "Expected fn")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected function name")
+    parser_expect(p, TOK_LPAREN(), "Expected (")
+    let params: *ParamList = parse_parameters(p)
+    parser_expect(p, TOK_RPAREN(), "Expected )")
+    parser_expect(p, TOK_ARROW(), "Expected ->")
+    let ret_type: *Type = parse_type(p)
+    let body: *StmtList = parse_block(p)
+    parser_expect(p, TOK_END(), "Expected end")
+
+    let d: *Decl = decl_new(DECL_FUNCTION(), line, col)
+    (^d).name = (^name_tok).value
+    (^d).name_len = (^name_tok).len
+    (^d).params = params
+    (^d).return_type = ret_type
+    (^d).body = body
+    return d
+end
+
+fn parse_extern_decl(p: *Parser) -> *Decl
+    let tok: *Token = parser_advance(p)
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    parser_expect(p, TOK_FN(), "Expected fn after extern")
+    let name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected function name")
+    parser_expect(p, TOK_LPAREN(), "Expected (")
+    let params: *ParamList = parse_parameters(p)
+    parser_expect(p, TOK_RPAREN(), "Expected )")
+    parser_expect(p, TOK_ARROW(), "Expected ->")
+    let ret_type: *Type = parse_type(p)
+
+    let d: *Decl = decl_new(DECL_EXTERN(), line, col)
+    (^d).name = (^name_tok).value
+    (^d).name_len = (^name_tok).len
+    (^d).params = params
+    (^d).return_type = ret_type
+    return d
+end
+
+fn parse_struct_decl(p: *Parser) -> *Decl
+    let tok: *Token = parser_expect(p, TOK_STRUCT(), "Expected struct")
+    let line: i32 = (^tok).line
+    let col: i32 = (^tok).col
+    let name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected struct name")
+
+    let mut fields: *StructFieldList = null
+    while not parser_check(p, TOK_END()) and not parser_is_at_end(p)
+        let field_name_tok: *Token = parser_expect(p, TOK_IDENT(), "Expected field name")
+        parser_expect(p, TOK_COLON(), "Expected :")
+        let field_type: *Type = parse_type(p)
+        let field: *StructField = struct_field_new((^field_name_tok).value, (^field_name_tok).len, field_type)
+        fields = struct_field_list_push(fields, field)
+    end
+
+    parser_expect(p, TOK_END(), "Expected end")
+
+    let d: *Decl = decl_new(DECL_STRUCT(), line, col)
+    (^d).name = (^name_tok).value
+    (^d).name_len = (^name_tok).len
+    (^d).fields = fields
+    return d
+end
+
+fn parse_declaration(p: *Parser) -> *Decl
+    if parser_check(p, TOK_FN())
+        return parse_function_decl(p)
+    end
+    if parser_check(p, TOK_STRUCT())
+        return parse_struct_decl(p)
+    end
+    if parser_check(p, TOK_EXTERN())
+        return parse_extern_decl(p)
+    end
+    parser_error(p, "Expected declaration")
+    return null
+end
+
+fn parse_program(p: *Parser) -> *Program
+    let prog: *Program = program_new()
+    while not parser_is_at_end(p)
+        let decl: *Decl = parse_declaration(p)
+        (^prog).decls = decl_list_push((^prog).decls, decl)
+    end
+    return prog
+end
+
+# Parser module - no main for linking

@@ -1,0 +1,7 @@
+# Test calling extern
+extern fn puts(s: *i8) -> i32
+
+fn main() -> i32
+    puts("Hello")
+    return 0
+end
