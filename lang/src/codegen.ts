@@ -40,6 +40,7 @@ export class CodeGenerator {
   private functions: Map<string, FunctionInfo> = new Map();
   private structs: Map<string, StructInfo> = new Map();
   private currentFunction: string = '';
+  private currentReturnType: AST.Type = { kind: 'void' };
   private variables: Map<string, Variable> = new Map();
 
   generate(program: AST.Program): string {
@@ -112,6 +113,7 @@ export class CodeGenerator {
 
   private generateFunction(fn: AST.FunctionDecl): void {
     this.currentFunction = fn.name;
+    this.currentReturnType = fn.returnType;
     this.variables.clear();
     this.tempCounter = 0;
     this.varCounter = 0;
@@ -240,6 +242,15 @@ export class CodeGenerator {
     return type.kind === 'i8' || type.kind === 'i32' || type.kind === 'i64' || type.kind === 'u8';
   }
 
+  private getIntegerWidth(type: AST.Type): number {
+    switch (type.kind) {
+      case 'i8': case 'u8': return 8;
+      case 'i32': return 32;
+      case 'i64': return 64;
+      default: return 0;
+    }
+  }
+
   private generateAssign(stmt: AST.AssignStmt): void {
     if (stmt.target.kind === 'identifier') {
       const varInfo = this.variables.get(stmt.target.name);
@@ -265,8 +276,9 @@ export class CodeGenerator {
   private generateIndexAssign(target: AST.IndexExpr, value: AST.Expr): void {
     const objType = this.inferType(target.object);
     const indexType = this.inferType(target.index);
+    const valueType = this.inferType(value);
     let index = this.generateExpr(target.index);
-    const val = this.generateExpr(value);
+    let val = this.generateExpr(value);
 
     // Convert index to i64 if needed
     if (indexType.kind === 'i32') {
@@ -278,12 +290,16 @@ export class CodeGenerator {
     if (objType.kind === 'array') {
       const objPtr = this.generateExprPtr(target.object);
       const elemType = this.typeToLLVM(objType.element);
+      // Convert value to match element type
+      val = this.convertValue(val, valueType, objType.element);
       const gepResult = this.nextTemp();
       this.emit(`  ${gepResult} = getelementptr inbounds ${this.typeToLLVM(objType)}, ptr ${objPtr}, i64 0, i64 ${index}`);
       this.emit(`  store ${elemType} ${val}, ptr ${gepResult}`);
     } else if (objType.kind === 'ptr') {
       const objVal = this.generateExpr(target.object);
       const elemType = this.typeToLLVM(objType.inner);
+      // Convert value to match element type
+      val = this.convertValue(val, valueType, objType.inner);
       const gepResult = this.nextTemp();
       this.emit(`  ${gepResult} = getelementptr inbounds ${elemType}, ptr ${objVal}, i64 ${index}`);
       this.emit(`  store ${elemType} ${val}, ptr ${gepResult}`);
@@ -466,9 +482,12 @@ export class CodeGenerator {
 
   private generateReturn(stmt: AST.ReturnStmt): void {
     if (stmt.value) {
-      const value = this.generateExpr(stmt.value);
-      const type = this.inferType(stmt.value);
-      this.emit(`  ret ${this.typeToLLVM(type)} ${value}`);
+      let value = this.generateExpr(stmt.value);
+      const exprType = this.inferType(stmt.value);
+      // Convert to function's declared return type if needed
+      value = this.convertValue(value, exprType, this.currentReturnType);
+      const retType = this.typeToLLVM(this.currentReturnType);
+      this.emit(`  ret ${retType} ${value}`);
     } else {
       this.emit('  ret void');
     }
@@ -718,15 +737,30 @@ export class CodeGenerator {
   }
 
   private generateBinary(expr: AST.BinaryExpr): string {
-    const left = this.generateExpr(expr.left);
-    const right = this.generateExpr(expr.right);
+    let left = this.generateExpr(expr.left);
+    let right = this.generateExpr(expr.right);
     const leftType = this.inferType(expr.left);
     const rightType = this.inferType(expr.right);
     const result = this.nextTemp();
 
     const isFloat = leftType.kind === 'f32' || leftType.kind === 'f64';
     const isSigned = leftType.kind === 'i32' || leftType.kind === 'i64' || leftType.kind === 'i8';
-    const llvmType = this.typeToLLVM(leftType);
+
+    // Convert operands to matching types if needed (for arithmetic operations)
+    let operandType = leftType;
+    if (this.isIntegerType(leftType) && this.isIntegerType(rightType)) {
+      // Widen to the larger type
+      const leftWidth = this.getIntegerWidth(leftType);
+      const rightWidth = this.getIntegerWidth(rightType);
+      if (leftWidth > rightWidth) {
+        right = this.convertValue(right, rightType, leftType);
+        operandType = leftType;
+      } else if (rightWidth > leftWidth) {
+        left = this.convertValue(left, leftType, rightType);
+        operandType = rightType;
+      }
+    }
+    const llvmType = this.typeToLLVM(operandType);
 
     switch (expr.op) {
       case '+':
@@ -861,8 +895,12 @@ export class CodeGenerator {
     }
 
     const args = expr.args.map((arg, i) => {
-      const value = this.generateExpr(arg);
-      const type = this.typeToLLVM(fnInfo.params[i].type);
+      let value = this.generateExpr(arg);
+      const argType = this.inferType(arg);
+      const paramType = fnInfo.params[i].type;
+      // Convert argument to match parameter type if needed
+      value = this.convertValue(value, argType, paramType);
+      const type = this.typeToLLVM(paramType);
       return `${type} ${value}`;
     }).join(', ');
 
@@ -959,7 +997,15 @@ export class CodeGenerator {
         if (['==', '!=', '<', '>', '<=', '>=', 'and', 'or'].includes(expr.op)) {
           return { kind: 'bool' };
         }
-        return this.inferType(expr.left);
+        // For arithmetic operations, return the wider type
+        const leftType = this.inferType(expr.left);
+        const rightType = this.inferType(expr.right);
+        if (this.isIntegerType(leftType) && this.isIntegerType(rightType)) {
+          const leftWidth = this.getIntegerWidth(leftType);
+          const rightWidth = this.getIntegerWidth(rightType);
+          return leftWidth >= rightWidth ? leftType : rightType;
+        }
+        return leftType;
       case 'unary':
         if (expr.op === 'not') return { kind: 'bool' };
         return this.inferType(expr.operand);

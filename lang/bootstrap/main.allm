@@ -1,0 +1,362 @@
+# ALLM Bootstrap Compiler - Main Driver
+# Compiles ALLM source code to LLVM IR
+
+# ============================================================
+# External declarations for libc
+# ============================================================
+
+extern fn malloc(size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+extern fn strcpy(dst: *i8, src: *i8) -> *i8
+
+extern fn fopen(filename: *i8, mode: *i8) -> *i8
+extern fn fclose(fp: *i8) -> i32
+extern fn fread(ptr: *i8, size: i64, n: i64, fp: *i8) -> i64
+extern fn fwrite(ptr: *i8, size: i64, n: i64, fp: *i8) -> i64
+extern fn fseek(fp: *i8, offset: i64, whence: i32) -> i32
+extern fn ftell(fp: *i8) -> i64
+
+extern fn printf(fmt: *i8) -> i32
+extern fn puts(s: *i8) -> i32
+extern fn exit(code: i32) -> void
+
+# ============================================================
+# External declarations for lexer module
+# ============================================================
+
+struct Token
+    type: i32
+    value: *i8
+    len: i32
+    line: i32
+    col: i32
+end
+
+struct Lexer
+    source: *i8
+    len: i64
+    pos: i64
+    line: i32
+    col: i32
+end
+
+extern fn lexer_new(source: *i8) -> Lexer
+extern fn lexer_next(lex: *Lexer) -> Token
+
+extern fn TOK_EOF() -> i32
+extern fn TOK_NEWLINE() -> i32
+
+# ============================================================
+# External declarations for parser module
+# ============================================================
+
+struct TokenArray
+    tokens: *Token
+    count: i32
+    capacity: i32
+end
+
+struct Program
+    decls: *DeclList
+end
+
+struct DeclList
+    decl: *Decl
+    next: *DeclList
+end
+
+struct Decl
+    kind: i32
+    name: *i8
+    name_len: i32
+    params: *ParamList
+    return_type: *Type
+    body: *StmtList
+    fields: *StructFieldList
+    line: i32
+    col: i32
+end
+
+struct ParamList
+    param: *Param
+    next: *ParamList
+end
+
+struct Param
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct Type
+    kind: i32
+    inner: *Type
+    size: i32
+    name: *i8
+    name_len: i32
+end
+
+struct StmtList
+    stmt: *Stmt
+    next: *StmtList
+end
+
+struct Stmt
+    kind: i32
+    name: *i8
+    name_len: i32
+    type: *Type
+    init: *Expr
+    target: *Expr
+    value: *Expr
+    condition: *Expr
+    then_block: *StmtList
+    else_ifs: *ElseIfList
+    else_block: *StmtList
+    start_expr: *Expr
+    end_expr: *Expr
+    step: *Expr
+    body: *StmtList
+    return_value: *Expr
+    mutable: bool
+    line: i32
+    col: i32
+end
+
+struct ElseIfList
+    condition: *Expr
+    block: *StmtList
+    next: *ElseIfList
+end
+
+struct Expr
+    kind: i32
+    int_value: i64
+    str_value: *i8
+    str_len: i32
+    bool_value: bool
+    left: *Expr
+    right: *Expr
+    op: i32
+    callee: *Expr
+    args: *ExprList
+    object: *Expr
+    member_name: *i8
+    member_len: i32
+    index_expr: *Expr
+    target_type: *Type
+    elements: *ExprList
+    field_names: *FieldInitList
+    line: i32
+    col: i32
+end
+
+struct ExprList
+    expr: *Expr
+    next: *ExprList
+end
+
+struct FieldInitList
+    name: *i8
+    name_len: i32
+    value: *Expr
+    next: *FieldInitList
+end
+
+struct StructFieldList
+    name: *i8
+    name_len: i32
+    type: *Type
+    next: *StructFieldList
+end
+
+extern fn token_array_new() -> *TokenArray
+extern fn token_array_push(arr: *TokenArray, tok: Token) -> void
+extern fn parser_new(tokens: *TokenArray) -> *Parser
+extern fn parse_program(p: *Parser) -> *Program
+
+struct Parser
+    tokens: *TokenArray
+    pos: i32
+end
+
+# ============================================================
+# External declarations for codegen module
+# ============================================================
+
+extern fn codegen_new() -> *CodeGen
+extern fn cg_gen_program(cg: *CodeGen, prog: *Program) -> void
+extern fn cg_get_output(cg: *CodeGen) -> *i8
+
+struct CodeGen
+    output: *StringBuffer
+    temp_counter: i32
+    label_counter: i32
+    var_counter: i32
+    string_counter: i32
+    variables: *VarList
+    functions: *FuncList
+    structs: *StructList
+    strings: *StringList
+end
+
+struct StringBuffer
+    data: *i8
+    len: i32
+    capacity: i32
+end
+
+struct VarList
+    var: *Variable
+    next: *VarList
+end
+
+struct Variable
+    name: *i8
+    name_len: i32
+    llvm_name: *i8
+    type: *Type
+    mutable: bool
+end
+
+struct FuncList
+    func: *FunctionInfo
+    next: *FuncList
+end
+
+struct FunctionInfo
+    name: *i8
+    name_len: i32
+    params: *ParamList
+    return_type: *Type
+    is_extern: bool
+end
+
+struct StructList
+    info: *StructInfo
+    next: *StructList
+end
+
+struct StructInfo
+    name: *i8
+    name_len: i32
+    fields: *StructFieldList
+end
+
+struct StringList
+    sc: *StringConst
+    next: *StringList
+end
+
+struct StringConst
+    value: *i8
+    value_len: i32
+    name: *i8
+end
+
+# ============================================================
+# File reading utilities
+# ============================================================
+
+fn read_file(filename: *i8) -> *i8
+    let fp: *i8 = fopen(filename, "rb")
+    if fp == null
+        puts("Error: Could not open input file")
+        exit(1)
+    end
+
+    # Get file size
+    fseek(fp, 0, 2)
+    let size: i64 = ftell(fp)
+    fseek(fp, 0, 0)
+
+    # Allocate and read
+    let content: *i8 = malloc(size + 1)
+    fread(content, 1, size, fp)
+    content[size] = 0
+
+    fclose(fp)
+    return content
+end
+
+fn write_file(filename: *i8, content: *i8) -> void
+    let fp: *i8 = fopen(filename, "w")
+    if fp == null
+        puts("Error: Could not open output file")
+        exit(1)
+    end
+
+    let len: i64 = strlen(content)
+    fwrite(content, 1, len, fp)
+    fclose(fp)
+end
+
+# ============================================================
+# Main compiler driver
+# ============================================================
+
+fn tokenize(source: *i8) -> *TokenArray
+    let tokens: *TokenArray = token_array_new()
+    let mut lex: Lexer = lexer_new(source)
+
+    let mut tok: Token = lexer_next(&lex)
+    while tok.type != TOK_EOF()
+        # Skip newlines - parser doesn't need them
+        if tok.type != TOK_NEWLINE()
+            token_array_push(tokens, tok)
+        end
+        tok = lexer_next(&lex)
+    end
+
+    # Add EOF token
+    token_array_push(tokens, tok)
+
+    return tokens
+end
+
+fn compile(source: *i8) -> *i8
+    # Tokenize
+    let tokens: *TokenArray = tokenize(source)
+
+    # Parse
+    let parser: *Parser = parser_new(tokens)
+    let program: *Program = parse_program(parser)
+
+    # Generate code
+    let cg: *CodeGen = codegen_new()
+    cg_gen_program(cg, program)
+
+    return cg_get_output(cg)
+end
+
+fn print_usage() -> void
+    puts("ALLM Bootstrap Compiler")
+    puts("Usage: allmc <input.allm> <output.ll>")
+end
+
+fn main(argc: i32, argv: **i8) -> i32
+    if argc < 3
+        print_usage()
+        return 1
+    end
+
+    let input_file: *i8 = argv[1]
+    let output_file: *i8 = argv[2]
+
+    puts("Reading input file...")
+    let source: *i8 = read_file(input_file)
+
+    puts("Compiling...")
+    let output: *i8 = compile(source)
+
+    puts("Writing output file...")
+    write_file(output_file, output)
+
+    puts("Done!")
+    return 0
+end

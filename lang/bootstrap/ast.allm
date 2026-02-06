@@ -1,0 +1,807 @@
+# ALLM Bootstrap Compiler - AST Definitions
+# Uses tagged unions via kind field + structs
+
+# Memory management
+extern fn malloc(size: i64) -> *i8
+extern fn realloc(ptr: *i8, size: i64) -> *i8
+extern fn free(ptr: *i8) -> void
+extern fn memcpy(dst: *i8, src: *i8, n: i64) -> *i8
+extern fn memset(ptr: *i8, c: i32, n: i64) -> *i8
+
+# String functions
+extern fn strlen(s: *i8) -> i64
+extern fn strcmp(s1: *i8, s2: *i8) -> i32
+extern fn strncmp(s1: *i8, s2: *i8, n: i64) -> i32
+extern fn strcpy(dst: *i8, src: *i8) -> *i8
+extern fn strcat(dst: *i8, src: *i8) -> *i8
+
+# I/O
+extern fn puts(s: *i8) -> i32
+extern fn putchar(c: i32) -> i32
+extern fn printf(fmt: *i8) -> i32
+
+# ============================================================
+# Type kind constants
+# ============================================================
+fn TYPE_I8() -> i32
+    return 1
+end
+
+fn TYPE_I32() -> i32
+    return 2
+end
+
+fn TYPE_I64() -> i32
+    return 3
+end
+
+fn TYPE_U8() -> i32
+    return 4
+end
+
+fn TYPE_F32() -> i32
+    return 5
+end
+
+fn TYPE_F64() -> i32
+    return 6
+end
+
+fn TYPE_BOOL() -> i32
+    return 7
+end
+
+fn TYPE_VOID() -> i32
+    return 8
+end
+
+fn TYPE_STR() -> i32
+    return 9
+end
+
+fn TYPE_NAMED() -> i32
+    return 10
+end
+
+fn TYPE_PTR() -> i32
+    return 11
+end
+
+fn TYPE_ARRAY() -> i32
+    return 12
+end
+
+# Type node structure
+struct Type
+    kind: i32
+    # For named types: the name
+    name: *i8
+    name_len: i32
+    # For pointer types: inner type
+    inner: *Type
+    # For array types: element type and size
+    element: *Type
+    size: i32
+end
+
+fn type_new(kind: i32) -> *Type
+    let t: *Type = malloc(64) as *Type
+    (^t).kind = kind
+    (^t).name = null
+    (^t).name_len = 0
+    (^t).inner = null
+    (^t).element = null
+    (^t).size = 0
+    return t
+end
+
+fn type_new_ptr(inner: *Type) -> *Type
+    let t: *Type = type_new(TYPE_PTR())
+    (^t).inner = inner
+    return t
+end
+
+fn type_new_array(element: *Type, size: i32) -> *Type
+    let t: *Type = type_new(TYPE_ARRAY())
+    (^t).element = element
+    (^t).size = size
+    return t
+end
+
+fn type_new_named(name: *i8, len: i32) -> *Type
+    let t: *Type = type_new(TYPE_NAMED())
+    (^t).name = name
+    (^t).name_len = len
+    return t
+end
+
+# ============================================================
+# Expression kind constants
+# ============================================================
+fn EXPR_INTEGER() -> i32
+    return 1
+end
+
+fn EXPR_FLOAT() -> i32
+    return 2
+end
+
+fn EXPR_STRING() -> i32
+    return 3
+end
+
+fn EXPR_BOOL() -> i32
+    return 4
+end
+
+fn EXPR_NULL() -> i32
+    return 5
+end
+
+fn EXPR_IDENT() -> i32
+    return 6
+end
+
+fn EXPR_BINARY() -> i32
+    return 7
+end
+
+fn EXPR_UNARY() -> i32
+    return 8
+end
+
+fn EXPR_CALL() -> i32
+    return 9
+end
+
+fn EXPR_MEMBER() -> i32
+    return 10
+end
+
+fn EXPR_STRUCT_LIT() -> i32
+    return 11
+end
+
+fn EXPR_INDEX() -> i32
+    return 12
+end
+
+fn EXPR_ADDR_OF() -> i32
+    return 13
+end
+
+fn EXPR_DEREF() -> i32
+    return 14
+end
+
+fn EXPR_CAST() -> i32
+    return 15
+end
+
+fn EXPR_SIZEOF() -> i32
+    return 16
+end
+
+# Binary operator constants
+fn OP_ADD() -> i32
+    return 1
+end
+
+fn OP_SUB() -> i32
+    return 2
+end
+
+fn OP_MUL() -> i32
+    return 3
+end
+
+fn OP_DIV() -> i32
+    return 4
+end
+
+fn OP_MOD() -> i32
+    return 5
+end
+
+fn OP_EQ() -> i32
+    return 6
+end
+
+fn OP_NE() -> i32
+    return 7
+end
+
+fn OP_LT() -> i32
+    return 8
+end
+
+fn OP_GT() -> i32
+    return 9
+end
+
+fn OP_LE() -> i32
+    return 10
+end
+
+fn OP_GE() -> i32
+    return 11
+end
+
+fn OP_AND() -> i32
+    return 12
+end
+
+fn OP_OR() -> i32
+    return 13
+end
+
+# Unary operator constants
+fn UNOP_NOT() -> i32
+    return 1
+end
+
+fn UNOP_NEG() -> i32
+    return 2
+end
+
+# Forward declaration of Expr
+struct Expr
+    kind: i32
+    line: i32
+    col: i32
+    # Integer literal
+    int_value: i64
+    # Float literal
+    float_value: f64
+    # String literal / identifier / callee name / member field
+    str_value: *i8
+    str_len: i32
+    # Bool literal
+    bool_value: bool
+    # Binary expression
+    op: i32
+    left: *Expr
+    right: *Expr
+    # Unary expression
+    unary_op: i32
+    operand: *Expr
+    # Call expression
+    args: *ExprList
+    # Member expression
+    object: *Expr
+    field: *i8
+    field_len: i32
+    # Struct literal
+    struct_name: *i8
+    struct_name_len: i32
+    struct_fields: *FieldInitList
+    # Index expression
+    index_obj: *Expr
+    index: *Expr
+    # Cast expression
+    cast_type: *Type
+    # Sizeof expression
+    sizeof_type: *Type
+end
+
+# Linked list of expressions (for function call arguments)
+struct ExprList
+    expr: *Expr
+    next: *ExprList
+end
+
+# Field initialization for struct literals
+struct FieldInit
+    name: *i8
+    name_len: i32
+    value: *Expr
+end
+
+struct FieldInitList
+    field: *FieldInit
+    next: *FieldInitList
+end
+
+fn expr_new(kind: i32, line: i32, col: i32) -> *Expr
+    let e: *Expr = malloc(256) as *Expr
+    (^e).kind = kind
+    (^e).line = line
+    (^e).col = col
+    (^e).int_value = 0
+    (^e).float_value = 0.0
+    (^e).str_value = null
+    (^e).str_len = 0
+    (^e).bool_value = false
+    (^e).op = 0
+    (^e).left = null
+    (^e).right = null
+    (^e).unary_op = 0
+    (^e).operand = null
+    (^e).args = null
+    (^e).object = null
+    (^e).field = null
+    (^e).field_len = 0
+    (^e).struct_name = null
+    (^e).struct_name_len = 0
+    (^e).struct_fields = null
+    (^e).index_obj = null
+    (^e).index = null
+    (^e).cast_type = null
+    (^e).sizeof_type = null
+    return e
+end
+
+fn expr_integer(value: i64, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_INTEGER(), line, col)
+    (^e).int_value = value
+    return e
+end
+
+fn expr_string(value: *i8, len: i32, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_STRING(), line, col)
+    (^e).str_value = value
+    (^e).str_len = len
+    return e
+end
+
+fn expr_bool(value: bool, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_BOOL(), line, col)
+    (^e).bool_value = value
+    return e
+end
+
+fn expr_null(line: i32, col: i32) -> *Expr
+    return expr_new(EXPR_NULL(), line, col)
+end
+
+fn expr_ident(name: *i8, len: i32, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_IDENT(), line, col)
+    (^e).str_value = name
+    (^e).str_len = len
+    return e
+end
+
+fn expr_binary(op: i32, left: *Expr, right: *Expr, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_BINARY(), line, col)
+    (^e).op = op
+    (^e).left = left
+    (^e).right = right
+    return e
+end
+
+fn expr_unary(op: i32, operand: *Expr, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_UNARY(), line, col)
+    (^e).unary_op = op
+    (^e).operand = operand
+    return e
+end
+
+fn expr_call(callee: *i8, callee_len: i32, args: *ExprList, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_CALL(), line, col)
+    (^e).str_value = callee
+    (^e).str_len = callee_len
+    (^e).args = args
+    return e
+end
+
+fn expr_member(object: *Expr, field: *i8, field_len: i32, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_MEMBER(), line, col)
+    (^e).object = object
+    (^e).field = field
+    (^e).field_len = field_len
+    return e
+end
+
+fn expr_index(object: *Expr, index: *Expr, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_INDEX(), line, col)
+    (^e).index_obj = object
+    (^e).index = index
+    return e
+end
+
+fn expr_addr_of(operand: *Expr, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_ADDR_OF(), line, col)
+    (^e).operand = operand
+    return e
+end
+
+fn expr_deref(operand: *Expr, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_DEREF(), line, col)
+    (^e).operand = operand
+    return e
+end
+
+fn expr_cast(operand: *Expr, target: *Type, line: i32, col: i32) -> *Expr
+    let e: *Expr = expr_new(EXPR_CAST(), line, col)
+    (^e).operand = operand
+    (^e).cast_type = target
+    return e
+end
+
+fn expr_list_push(list: *ExprList, expr: *Expr) -> *ExprList
+    let node: *ExprList = malloc(24) as *ExprList
+    (^node).expr = expr
+    (^node).next = null
+    if list == null
+        return node
+    end
+    let mut cur: *ExprList = list
+    while (^cur).next != null
+        cur = (^cur).next
+    end
+    (^cur).next = node
+    return list
+end
+
+# ============================================================
+# Statement kind constants
+# ============================================================
+fn STMT_LET() -> i32
+    return 1
+end
+
+fn STMT_ASSIGN() -> i32
+    return 2
+end
+
+fn STMT_IF() -> i32
+    return 3
+end
+
+fn STMT_WHILE() -> i32
+    return 4
+end
+
+fn STMT_FOR() -> i32
+    return 5
+end
+
+fn STMT_RETURN() -> i32
+    return 6
+end
+
+fn STMT_EXPR() -> i32
+    return 7
+end
+
+# Statement structure
+struct Stmt
+    kind: i32
+    line: i32
+    col: i32
+    # Let statement
+    let_name: *i8
+    let_name_len: i32
+    let_mutable: bool
+    let_type: *Type
+    let_init: *Expr
+    # Assign statement
+    assign_target: *Expr
+    assign_value: *Expr
+    # If statement
+    if_cond: *Expr
+    if_then: *StmtList
+    if_else_ifs: *ElseIfList
+    if_else: *StmtList
+    # While statement
+    while_cond: *Expr
+    while_body: *StmtList
+    # For statement
+    for_var: *i8
+    for_var_len: i32
+    for_start: *Expr
+    for_end: *Expr
+    for_body: *StmtList
+    # Return statement
+    return_value: *Expr
+    # Expression statement
+    expr_stmt: *Expr
+end
+
+# Linked list of statements
+struct StmtList
+    stmt: *Stmt
+    next: *StmtList
+end
+
+# Else-if clause
+struct ElseIf
+    cond: *Expr
+    body: *StmtList
+end
+
+struct ElseIfList
+    elif: *ElseIf
+    next: *ElseIfList
+end
+
+fn stmt_new(kind: i32, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = malloc(256) as *Stmt
+    (^s).kind = kind
+    (^s).line = line
+    (^s).col = col
+    (^s).let_name = null
+    (^s).let_name_len = 0
+    (^s).let_mutable = false
+    (^s).let_type = null
+    (^s).let_init = null
+    (^s).assign_target = null
+    (^s).assign_value = null
+    (^s).if_cond = null
+    (^s).if_then = null
+    (^s).if_else_ifs = null
+    (^s).if_else = null
+    (^s).while_cond = null
+    (^s).while_body = null
+    (^s).for_var = null
+    (^s).for_var_len = 0
+    (^s).for_start = null
+    (^s).for_end = null
+    (^s).for_body = null
+    (^s).return_value = null
+    (^s).expr_stmt = null
+    return s
+end
+
+fn stmt_let(name: *i8, name_len: i32, mutable: bool, typ: *Type, init: *Expr, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_LET(), line, col)
+    (^s).let_name = name
+    (^s).let_name_len = name_len
+    (^s).let_mutable = mutable
+    (^s).let_type = typ
+    (^s).let_init = init
+    return s
+end
+
+fn stmt_assign(target: *Expr, value: *Expr, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_ASSIGN(), line, col)
+    (^s).assign_target = target
+    (^s).assign_value = value
+    return s
+end
+
+fn stmt_if(cond: *Expr, then_block: *StmtList, else_ifs: *ElseIfList, else_block: *StmtList, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_IF(), line, col)
+    (^s).if_cond = cond
+    (^s).if_then = then_block
+    (^s).if_else_ifs = else_ifs
+    (^s).if_else = else_block
+    return s
+end
+
+fn stmt_while(cond: *Expr, body: *StmtList, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_WHILE(), line, col)
+    (^s).while_cond = cond
+    (^s).while_body = body
+    return s
+end
+
+fn stmt_for(vname: *i8, vname_len: i32, start_expr: *Expr, end_expr: *Expr, body: *StmtList, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_FOR(), line, col)
+    (^s).for_var = vname
+    (^s).for_var_len = vname_len
+    (^s).for_start = start_expr
+    (^s).for_end = end_expr
+    (^s).for_body = body
+    return s
+end
+
+fn stmt_return(value: *Expr, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_RETURN(), line, col)
+    (^s).return_value = value
+    return s
+end
+
+fn stmt_expr(expr: *Expr, line: i32, col: i32) -> *Stmt
+    let s: *Stmt = stmt_new(STMT_EXPR(), line, col)
+    (^s).expr_stmt = expr
+    return s
+end
+
+fn stmt_list_push(list: *StmtList, stmt: *Stmt) -> *StmtList
+    let node: *StmtList = malloc(24) as *StmtList
+    (^node).stmt = stmt
+    (^node).next = null
+    if list == null
+        return node
+    end
+    let mut cur: *StmtList = list
+    while (^cur).next != null
+        cur = (^cur).next
+    end
+    (^cur).next = node
+    return list
+end
+
+# ============================================================
+# Declaration kind constants
+# ============================================================
+fn DECL_FUNCTION() -> i32
+    return 1
+end
+
+fn DECL_STRUCT() -> i32
+    return 2
+end
+
+fn DECL_EXTERN() -> i32
+    return 3
+end
+
+# Parameter structure
+struct Param
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct ParamList
+    param: *Param
+    next: *ParamList
+end
+
+# Struct field
+struct StructField
+    name: *i8
+    name_len: i32
+    type: *Type
+end
+
+struct StructFieldList
+    field: *StructField
+    next: *StructFieldList
+end
+
+# Declaration structure
+struct Decl
+    kind: i32
+    line: i32
+    col: i32
+    # Function/extern name
+    name: *i8
+    name_len: i32
+    # Function parameters
+    params: *ParamList
+    # Function return type
+    return_type: *Type
+    # Function body (null for extern)
+    body: *StmtList
+    # Struct fields
+    fields: *StructFieldList
+end
+
+struct DeclList
+    decl: *Decl
+    next: *DeclList
+end
+
+fn decl_new(kind: i32, line: i32, col: i32) -> *Decl
+    let d: *Decl = malloc(128) as *Decl
+    (^d).kind = kind
+    (^d).line = line
+    (^d).col = col
+    (^d).name = null
+    (^d).name_len = 0
+    (^d).params = null
+    (^d).return_type = null
+    (^d).body = null
+    (^d).fields = null
+    return d
+end
+
+fn decl_function(name: *i8, name_len: i32, params: *ParamList, ret: *Type, body: *StmtList, line: i32, col: i32) -> *Decl
+    let d: *Decl = decl_new(DECL_FUNCTION(), line, col)
+    (^d).name = name
+    (^d).name_len = name_len
+    (^d).params = params
+    (^d).return_type = ret
+    (^d).body = body
+    return d
+end
+
+fn decl_extern(name: *i8, name_len: i32, params: *ParamList, ret: *Type, line: i32, col: i32) -> *Decl
+    let d: *Decl = decl_new(DECL_EXTERN(), line, col)
+    (^d).name = name
+    (^d).name_len = name_len
+    (^d).params = params
+    (^d).return_type = ret
+    return d
+end
+
+fn decl_struct(name: *i8, name_len: i32, fields: *StructFieldList, line: i32, col: i32) -> *Decl
+    let d: *Decl = decl_new(DECL_STRUCT(), line, col)
+    (^d).name = name
+    (^d).name_len = name_len
+    (^d).fields = fields
+    return d
+end
+
+fn decl_list_push(list: *DeclList, decl: *Decl) -> *DeclList
+    let node: *DeclList = malloc(24) as *DeclList
+    (^node).decl = decl
+    (^node).next = null
+    if list == null
+        return node
+    end
+    let mut cur: *DeclList = list
+    while (^cur).next != null
+        cur = (^cur).next
+    end
+    (^cur).next = node
+    return list
+end
+
+fn param_new(name: *i8, name_len: i32, typ: *Type) -> *Param
+    let p: *Param = malloc(32) as *Param
+    (^p).name = name
+    (^p).name_len = name_len
+    (^p).type = typ
+    return p
+end
+
+fn param_list_push(list: *ParamList, param: *Param) -> *ParamList
+    let node: *ParamList = malloc(24) as *ParamList
+    (^node).param = param
+    (^node).next = null
+    if list == null
+        return node
+    end
+    let mut cur: *ParamList = list
+    while (^cur).next != null
+        cur = (^cur).next
+    end
+    (^cur).next = node
+    return list
+end
+
+fn struct_field_new(name: *i8, name_len: i32, typ: *Type) -> *StructField
+    let f: *StructField = malloc(32) as *StructField
+    (^f).name = name
+    (^f).name_len = name_len
+    (^f).type = typ
+    return f
+end
+
+fn struct_field_list_push(list: *StructFieldList, field: *StructField) -> *StructFieldList
+    let node: *StructFieldList = malloc(24) as *StructFieldList
+    (^node).field = field
+    (^node).next = null
+    if list == null
+        return node
+    end
+    let mut cur: *StructFieldList = list
+    while (^cur).next != null
+        cur = (^cur).next
+    end
+    (^cur).next = node
+    return list
+end
+
+# Program structure
+struct Program
+    decls: *DeclList
+end
+
+fn program_new() -> *Program
+    let p: *Program = malloc(16) as *Program
+    (^p).decls = null
+    return p
+end
+
+# ============================================================
+# Helper functions
+# ============================================================
+
+fn type_is_integer(t: *Type) -> bool
+    let k: i32 = (^t).kind
+    return k == TYPE_I8() or k == TYPE_I32() or k == TYPE_I64() or k == TYPE_U8()
+end
+
+fn type_is_float(t: *Type) -> bool
+    let k: i32 = (^t).kind
+    return k == TYPE_F32() or k == TYPE_F64()
+end
+
+fn type_is_numeric(t: *Type) -> bool
+    return type_is_integer(t) or type_is_float(t)
+end

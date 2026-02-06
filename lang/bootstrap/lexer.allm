@@ -117,6 +117,10 @@ fn TOK_EXTERN() -> i32
     return 22
 end
 
+fn TOK_AS() -> i32
+    return 23
+end
+
 fn TOK_I8() -> i32
     return 31
 end
@@ -253,6 +257,10 @@ fn TOK_RBRACKET() -> i32
     return 79
 end
 
+fn TOK_NEWLINE() -> i32
+    return 80
+end
+
 # Character classification
 fn is_digit(c: i32) -> bool
     return c >= 48 and c <= 57
@@ -374,6 +382,9 @@ fn check_keyword(s: *i8, len: i32) -> i32
         end
         if strncmp(s, "or", 2) == 0
             return TOK_OR()
+        end
+        if strncmp(s, "as", 2) == 0
+            return TOK_AS()
         end
         if strncmp(s, "i8", 2) == 0
             return TOK_I8()
@@ -625,44 +636,4 @@ fn lexer_next(lex: *Lexer) -> Token
     return make_token(0, null, 0, line, col)
 end
 
-# Test the lexer
-fn main() -> i32
-    let source: *i8 = "fn main() -> i32\n    let x: i32 = 42\n    return x\nend"
-    let mut lex: Lexer = lexer_new(source)
-
-    let mut tok: Token = lexer_next(&lex)
-    while tok.type != TOK_EOF()
-        # Print token type
-        if tok.type == TOK_FN()
-            puts("FN")
-        else if tok.type == TOK_IDENT()
-            puts("IDENT")
-        else if tok.type == TOK_LPAREN()
-            puts("LPAREN")
-        else if tok.type == TOK_RPAREN()
-            puts("RPAREN")
-        else if tok.type == TOK_ARROW()
-            puts("ARROW")
-        else if tok.type == TOK_I32()
-            puts("I32")
-        else if tok.type == TOK_LET()
-            puts("LET")
-        else if tok.type == TOK_COLON()
-            puts("COLON")
-        else if tok.type == TOK_ASSIGN()
-            puts("ASSIGN")
-        else if tok.type == TOK_INTEGER()
-            puts("INTEGER")
-        else if tok.type == TOK_RETURN()
-            puts("RETURN")
-        else if tok.type == TOK_END()
-            puts("END")
-        else
-            puts("OTHER")
-        end
-        tok = lexer_next(&lex)
-    end
-
-    puts("Done!")
-    return 0
-end
+# Lexer module - no main for linking

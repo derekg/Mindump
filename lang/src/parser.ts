@@ -19,7 +19,7 @@ export class Parser {
   private pos: number = 0;
 
   constructor(tokens: Token[]) {
-    // Filter out newlines for simpler parsing (we use keywords for blocks)
+    // Filter out newlines for simpler parsing, but track line numbers on tokens
     this.tokens = tokens.filter(t => t.type !== TokenType.NEWLINE);
   }
 
@@ -412,6 +412,9 @@ export class Parser {
         const index = this.expression();
         this.expect(TokenType.RBRACKET, 'Expected "]" after index');
         expr = { kind: 'index', object: expr, index, loc };
+      } else if (this.match(TokenType.AS)) {
+        const targetType = this.parseType();
+        expr = { kind: 'cast', expr, targetType, loc };
       } else {
         break;
       }
@@ -460,10 +463,12 @@ export class Parser {
 
     // Identifier, call, or struct literal
     if (this.check(TokenType.IDENT)) {
-      const name = this.advance().value;
+      const identToken = this.advance();
+      const name = identToken.value;
 
-      // Function call
-      if (this.match(TokenType.LPAREN)) {
+      // Function call - only if ( is on the same line as the identifier
+      if (this.check(TokenType.LPAREN) && this.peek().line === identToken.line) {
+        this.advance(); // consume (
         const args: AST.Expr[] = [];
         if (!this.check(TokenType.RPAREN)) {
           do {
@@ -474,8 +479,9 @@ export class Parser {
         return { kind: 'call', callee: name, args, loc };
       }
 
-      // Struct literal
-      if (this.match(TokenType.LBRACE)) {
+      // Struct literal - only if { is on the same line as the identifier
+      if (this.check(TokenType.LBRACE) && this.peek().line === identToken.line) {
+        this.advance(); // consume {
         const fields: { name: string; value: AST.Expr }[] = [];
         if (!this.check(TokenType.RBRACE)) {
           do {

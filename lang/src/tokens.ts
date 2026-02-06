@@ -26,6 +26,7 @@ export enum TokenType {
   AND = 'AND',
   OR = 'OR',
   NOT = 'NOT',
+  AS = 'AS',
 
   // Type keywords
   I8 = 'I8',
@@ -95,6 +96,7 @@ export const KEYWORDS: Record<string, TokenType> = {
   'and': TokenType.AND,
   'or': TokenType.OR,
   'not': TokenType.NOT,
+  'as': TokenType.AS,
   'true': TokenType.TRUE,
   'false': TokenType.FALSE,
   'null': TokenType.NULL,
