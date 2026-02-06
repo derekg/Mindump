@@ -1,0 +1,12 @@
+# Test extern and function
+extern fn malloc(size: i64) -> *i8
+extern fn puts(s: *i8) -> i32
+
+fn greet() -> void
+    puts("Hello")
+end
+
+fn main() -> i32
+    greet()
+    return 0
+end

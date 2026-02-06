@@ -1,0 +1,8 @@
+# Test void function
+fn greet() -> void
+end
+
+fn main() -> i32
+    greet()
+    return 0
+end
