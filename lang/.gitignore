@@ -16,3 +16,4 @@ examples/prime
 examples/gcd
 examples/memory
 bootstrap/lexer
+build/
