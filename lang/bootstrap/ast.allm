@@ -249,39 +249,25 @@ struct Expr
     kind: i32
     line: i32
     col: i32
-    # Integer literal
     int_value: i64
-    # Float literal
-    float_value: f64
-    # String literal / identifier / callee name / member field
     str_value: *i8
     str_len: i32
-    # Bool literal
     bool_value: bool
-    # Binary expression
     op: i32
     left: *Expr
     right: *Expr
-    # Unary expression
     unary_op: i32
     operand: *Expr
-    # Call expression
     args: *ExprList
-    # Member expression
     object: *Expr
     field: *i8
     field_len: i32
-    # Struct literal
     struct_name: *i8
     struct_name_len: i32
     struct_fields: *FieldInitList
-    # Index expression
     index_obj: *Expr
     index: *Expr
-    # Cast expression
     cast_type: *Type
-    # Sizeof expression
-    sizeof_type: *Type
 end
 
 # Linked list of expressions (for function call arguments)
@@ -308,7 +294,6 @@ fn expr_new(kind: i32, line: i32, col: i32) -> *Expr
     (^e).line = line
     (^e).col = col
     (^e).int_value = 0
-    (^e).float_value = 0.0
     (^e).str_value = null
     (^e).str_len = 0
     (^e).bool_value = false
@@ -327,7 +312,6 @@ fn expr_new(kind: i32, line: i32, col: i32) -> *Expr
     (^e).index_obj = null
     (^e).index = null
     (^e).cast_type = null
-    (^e).sizeof_type = null
     return e
 end
 

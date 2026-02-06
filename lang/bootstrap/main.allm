@@ -72,14 +72,14 @@ end
 
 struct Decl
     kind: i32
+    line: i32
+    col: i32
     name: *i8
     name_len: i32
     params: *ParamList
     return_type: *Type
     body: *StmtList
     fields: *StructFieldList
-    line: i32
-    col: i32
 end
 
 struct ParamList
@@ -207,8 +207,8 @@ end
 
 struct StringBuffer
     data: *i8
-    len: i32
-    capacity: i32
+    len: i64
+    capacity: i64
 end
 
 struct VarList

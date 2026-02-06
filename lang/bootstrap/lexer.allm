@@ -597,7 +597,15 @@ fn lexer_next(lex: *Lexer) -> Token
         lexer_advance(lex)
         let start: i64 = (^lex).pos
         while lexer_peek(lex) != 34 and lexer_peek(lex) != 0
-            lexer_advance(lex)
+            # Handle escape sequences - skip backslash and next char
+            if lexer_peek(lex) == 92
+                lexer_advance(lex)
+                if lexer_peek(lex) != 0
+                    lexer_advance(lex)
+                end
+            else
+                lexer_advance(lex)
+            end
         end
         let slen: i32 = (^lex).pos - start
         let s: *i8 = (^lex).source

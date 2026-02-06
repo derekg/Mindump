@@ -297,6 +297,7 @@ fn sb_append_int(sb: *StringBuffer, n: i64) -> void
         val = 0 - val
     end
     let mut i: i32 = 30
+    arr[31] = 0  # Null terminate
     if val == 0
         arr[i] = 48
         i = i - 1
@@ -378,6 +379,8 @@ struct CodeGen
     functions: *FunctionList
     structs: *StructList
     strings: *StringList
+    current_return_type: *Type
+    block_terminated: bool
 end
 
 fn codegen_new() -> *CodeGen
@@ -391,6 +394,8 @@ fn codegen_new() -> *CodeGen
     (^cg).functions = null
     (^cg).structs = null
     (^cg).strings = null
+    (^cg).current_return_type = null
+    (^cg).block_terminated = false
     return cg
 end
 
@@ -591,6 +596,18 @@ fn cg_type_to_llvm(cg: *CodeGen, t: *Type) -> void
     end
 end
 
+# Get the LLVM type string for a type kind
+fn cg_type_kind_to_str(kind: i32) -> *i8
+    if kind == TYPE_I64()
+        return "i64"
+    else if kind == TYPE_BOOL()
+        return "i1"
+    else if kind == TYPE_PTR()
+        return "ptr"
+    end
+    return "i32"
+end
+
 # ============================================================
 # Expression code generation
 # ============================================================
@@ -687,7 +704,10 @@ fn cg_gen_string(cg: *CodeGen, e: *Expr) -> i32
     (^cg).strings = node
 
     # Return special marker for string constant
-    return 0 - 10000 - num
+    # Use computed base to avoid the literal appearing in encoded output
+    let base: i32 = 1050000000
+    base = base + 1050000000
+    return 0 - base - num
 end
 
 fn cg_gen_bool(cg: *CodeGen, e: *Expr) -> i32
@@ -699,7 +719,7 @@ fn cg_gen_bool(cg: *CodeGen, e: *Expr) -> i32
 end
 
 fn cg_gen_null(cg: *CodeGen, e: *Expr) -> i32
-    return 0 - 3
+    return 0 - 9999
 end
 
 fn cg_gen_ident(cg: *CodeGen, e: *Expr) -> i32
@@ -720,9 +740,107 @@ fn cg_gen_ident(cg: *CodeGen, e: *Expr) -> i32
 end
 
 fn cg_gen_binary(cg: *CodeGen, e: *Expr) -> i32
+    # Infer type of left operand for proper type selection
+    let left_type_ptr: *Type = cg_infer_type(cg, (^e).left)
+    let left_type_kind: i32 = (^left_type_ptr).kind
+    let type_str: *i8 = cg_type_kind_to_str(left_type_kind)
+
     let left_t: i32 = cg_gen_expr(cg, (^e).left)
     let right_t: i32 = cg_gen_expr(cg, (^e).right)
     let op: i32 = (^e).op
+
+    # Handle pointer arithmetic specially - need to convert index first
+    if op == OP_ADD() and (left_type_kind == TYPE_PTR() or left_type_kind == TYPE_STR())
+        # Convert index to i64 if it's i32
+        let right_type_ptr: *Type = cg_infer_type(cg, (^e).right)
+        let right_type_kind: i32 = (^right_type_ptr).kind
+        let mut idx_t: i32 = right_t
+        if right_type_kind == TYPE_I32()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, right_t)
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            idx_t = conv_t
+        end
+        let t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, t)
+        cg_emit(cg, " = getelementptr inbounds ")
+        # Use the inner type for proper pointer arithmetic scaling
+        let inner_type: *Type = (^left_type_ptr).inner
+        if inner_type != null
+            cg_type_to_llvm(cg, inner_type)
+        else
+            cg_emit(cg, "i8")
+        end
+        cg_emit(cg, ", ptr ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, ", i64 ")
+        cg_emit_operand(cg, idx_t)
+        cg_newline(cg)
+        return t
+    end
+
+    # Handle type promotion for mixed i32/i64 operations
+    let right_type_ptr: *Type = cg_infer_type(cg, (^e).right)
+    let right_type_kind: i32 = (^right_type_ptr).kind
+    let mut actual_right_t: i32 = right_t
+    let mut actual_left_t: i32 = left_t
+    let mut use_type: *i8 = type_str
+
+    # Promote right to i64 if left is i64
+    if left_type_kind == TYPE_I64() and right_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, right_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_right_t = conv_t
+    end
+
+    # Promote left to i64 if right is i64
+    if left_type_kind == TYPE_I32() and right_type_kind == TYPE_I64()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_left_t = conv_t
+        use_type = "i64"
+    end
+
+    # Promote left i8 to i32 if right is i32
+    if (left_type_kind == TYPE_I8() or left_type_kind == TYPE_U8()) and right_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, left_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        actual_left_t = conv_t
+        use_type = "i32"
+    end
+
+    # Promote right i8 to i32 if left is i32
+    if left_type_kind == TYPE_I32() and (right_type_kind == TYPE_I8() or right_type_kind == TYPE_U8())
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, right_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        actual_right_t = conv_t
+    end
+
     let t: i32 = cg_next_temp(cg)
 
     cg_emit(cg, "  ")
@@ -730,36 +848,58 @@ fn cg_gen_binary(cg: *CodeGen, e: *Expr) -> i32
     cg_emit(cg, " = ")
 
     if op == OP_ADD()
-        cg_emit(cg, "add i32 ")
+        cg_emit(cg, "add ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_SUB()
-        cg_emit(cg, "sub i32 ")
+        cg_emit(cg, "sub ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_MUL()
-        cg_emit(cg, "mul i32 ")
+        cg_emit(cg, "mul ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_DIV()
-        cg_emit(cg, "sdiv i32 ")
+        cg_emit(cg, "sdiv ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_MOD()
-        cg_emit(cg, "srem i32 ")
+        cg_emit(cg, "srem ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_EQ()
-        cg_emit(cg, "icmp eq i32 ")
+        cg_emit(cg, "icmp eq ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_NE()
-        cg_emit(cg, "icmp ne i32 ")
+        cg_emit(cg, "icmp ne ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_LT()
-        cg_emit(cg, "icmp slt i32 ")
+        cg_emit(cg, "icmp slt ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_GT()
-        cg_emit(cg, "icmp sgt i32 ")
+        cg_emit(cg, "icmp sgt ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_LE()
-        cg_emit(cg, "icmp sle i32 ")
+        cg_emit(cg, "icmp sle ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_GE()
-        cg_emit(cg, "icmp sge i32 ")
+        cg_emit(cg, "icmp sge ")
+        cg_emit(cg, use_type)
+        cg_emit(cg, " ")
     else if op == OP_AND()
         cg_emit(cg, "and i1 ")
     else if op == OP_OR()
         cg_emit(cg, "or i1 ")
     end
 
-    cg_emit_operand(cg, left_t)
+    cg_emit_operand(cg, actual_left_t)
     cg_emit(cg, ", ")
-    cg_emit_operand(cg, right_t)
+    cg_emit_operand(cg, actual_right_t)
     cg_newline(cg)
 
     return t
@@ -772,15 +912,20 @@ fn cg_emit_operand(cg: *CodeGen, t: i32) -> void
         cg_emit(cg, "0")
     else if t == 0 - 2
         cg_emit(cg, "1")
-    else if t == 0 - 3
+    else if t == 0 - 9999
         cg_emit(cg, "null")
-    else if t <= 0 - 10000
-        let idx: i32 = 0 - t - 10000
-        cg_emit(cg, "@.str.")
-        cg_emit_int(cg, idx)
     else
-        let val: i64 = 0 - t - 1
-        cg_emit_int(cg, val)
+        # Check for string constant using computed base
+        let base: i32 = 1050000000
+        base = base + 1050000000
+        if t <= 0 - base
+            let idx: i32 = 0 - t - base
+            cg_emit(cg, "@.str.")
+            cg_emit_int(cg, idx)
+        else
+            let val: i64 = 0 - t - 1
+            cg_emit_int(cg, val)
+        end
     end
 end
 
@@ -828,6 +973,36 @@ fn cg_gen_call(cg: *CodeGen, e: *Expr) -> i32
     let ret_type: *Type = (^func).return_type
     let is_void: bool = (^ret_type).kind == TYPE_VOID()
 
+    # Check for type conversions needed BEFORE emitting the call
+    let arg_converted: *i32 = malloc(128) as *i32
+    let mut param_check: *ParamList = (^func).params
+    let mut arg_check: *ExprList = (^e).args
+    let mut j: i32 = 0
+    while j < arg_count
+        arg_converted[j] = arg_arr[j]
+        let param_p: *Param = (^param_check).param
+        let param_type_kind: i32 = (^(^param_p).type).kind
+        let arg_e: *Expr = (^arg_check).expr
+        let arg_type: *Type = cg_infer_type(cg, arg_e)
+        let arg_type_kind: i32 = (^arg_type).kind
+
+        # Convert i32 to i64 if needed
+        if arg_type_kind == TYPE_I32() and param_type_kind == TYPE_I64()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, arg_arr[j])
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            arg_converted[j] = conv_t
+        end
+
+        param_check = (^param_check).next
+        arg_check = (^arg_check).next
+        j = j + 1
+    end
+
     let t: i32 = cg_next_temp(cg)
     cg_emit(cg, "  ")
     if not is_void
@@ -849,7 +1024,7 @@ fn cg_gen_call(cg: *CodeGen, e: *Expr) -> i32
         let param: *Param = (^param_cur).param
         cg_type_to_llvm(cg, (^param).type)
         cg_emit(cg, " ")
-        cg_emit_operand(cg, arg_arr[i])
+        cg_emit_operand(cg, arg_converted[i])
         param_cur = (^param_cur).next
         i = i + 1
     end
@@ -890,6 +1065,20 @@ fn cg_gen_index(cg: *CodeGen, e: *Expr) -> i32
     let idx_t: i32 = cg_gen_expr(cg, (^e).index)
     let obj_type: *Type = cg_infer_type(cg, (^e).index_obj)
 
+    # Convert index to i64 if needed
+    let idx_type: *Type = cg_infer_type(cg, (^e).index)
+    let mut actual_idx: i32 = idx_t
+    if (^idx_type).kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, idx_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        actual_idx = conv_t
+    end
+
     let gep_t: i32 = cg_next_temp(cg)
     cg_emit(cg, "  ")
     cg_emit_temp(cg, gep_t)
@@ -903,7 +1092,7 @@ fn cg_gen_index(cg: *CodeGen, e: *Expr) -> i32
     cg_emit(cg, ", ptr ")
     cg_emit_operand(cg, obj_t)
     cg_emit(cg, ", i64 ")
-    cg_emit_operand(cg, idx_t)
+    cg_emit_operand(cg, actual_idx)
     cg_newline(cg)
 
     let t: i32 = cg_next_temp(cg)
@@ -1053,6 +1242,20 @@ fn cg_gen_expr_ptr(cg: *CodeGen, e: *Expr) -> i32
         let idx_t: i32 = cg_gen_expr(cg, (^e).index)
         let obj_type: *Type = cg_infer_type(cg, (^e).index_obj)
 
+        # Convert index to i64 if needed
+        let idx_type: *Type = cg_infer_type(cg, (^e).index)
+        let mut actual_idx: i32 = idx_t
+        if (^idx_type).kind == TYPE_I32()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = sext i32 ")
+            cg_emit_operand(cg, idx_t)
+            cg_emit(cg, " to i64")
+            cg_newline(cg)
+            actual_idx = conv_t
+        end
+
         let t: i32 = cg_next_temp(cg)
         cg_emit(cg, "  ")
         cg_emit_temp(cg, t)
@@ -1065,7 +1268,7 @@ fn cg_gen_expr_ptr(cg: *CodeGen, e: *Expr) -> i32
         cg_emit(cg, ", ptr ")
         cg_emit_operand(cg, obj_t)
         cg_emit(cg, ", i64 ")
-        cg_emit_operand(cg, idx_t)
+        cg_emit_operand(cg, actual_idx)
         cg_newline(cg)
         return t
     end
@@ -1119,7 +1322,15 @@ fn cg_infer_type(cg: *CodeGen, e: *Expr) -> *Type
             (^t).kind = TYPE_BOOL()
             return t
         end
-        return cg_infer_type(cg, (^e).left)
+        # For arithmetic, return the larger type
+        let left_t: *Type = cg_infer_type(cg, (^e).left)
+        let right_t: *Type = cg_infer_type(cg, (^e).right)
+        if (^left_t).kind == TYPE_I64() or (^right_t).kind == TYPE_I64()
+            let t: *Type = malloc(64) as *Type
+            (^t).kind = TYPE_I64()
+            return t
+        end
+        return left_t
     else if k == EXPR_UNARY()
         if (^e).unary_op == UNOP_NOT()
             let t: *Type = malloc(64) as *Type
@@ -1232,10 +1443,65 @@ fn cg_gen_let(cg: *CodeGen, s: *Stmt) -> void
     cg_newline(cg)
 
     let init_t: i32 = cg_gen_expr(cg, (^s).let_init)
+
+    # Check if type conversion is needed
+    let init_type: *Type = cg_infer_type(cg, (^s).let_init)
+    let var_type_kind: i32 = (^(^s).let_type).kind
+    let init_type_kind: i32 = (^init_type).kind
+    let mut store_t: i32 = init_t
+
+    # Convert i32 to i8 if needed (truncation)
+    if init_type_kind == TYPE_I32() and var_type_kind == TYPE_I8()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = trunc i32 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i8")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i8 to i32 if needed
+    if init_type_kind == TYPE_I8() and var_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i8 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i64 to i32 if needed (truncation)
+    if init_type_kind == TYPE_I64() and var_type_kind == TYPE_I32()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = trunc i64 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i32")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
+    # Convert i32 to i64 if needed (extension)
+    if init_type_kind == TYPE_I32() and var_type_kind == TYPE_I64()
+        let conv_t: i32 = cg_next_temp(cg)
+        cg_emit(cg, "  ")
+        cg_emit_temp(cg, conv_t)
+        cg_emit(cg, " = sext i32 ")
+        cg_emit_operand(cg, init_t)
+        cg_emit(cg, " to i64")
+        cg_newline(cg)
+        store_t = conv_t
+    end
+
     cg_emit(cg, "  store ")
     cg_type_to_llvm(cg, (^s).let_type)
     cg_emit(cg, " ")
-    cg_emit_operand(cg, init_t)
+    cg_emit_operand(cg, store_t)
     cg_emit(cg, ", ptr ")
     cg_emit(cg, llvm_name)
     cg_newline(cg)
@@ -1260,10 +1526,27 @@ fn cg_gen_assign(cg: *CodeGen, s: *Stmt) -> void
     else if tk == EXPR_MEMBER() or tk == EXPR_DEREF() or tk == EXPR_INDEX()
         let ptr_t: i32 = cg_gen_expr_ptr(cg, target)
         let target_type: *Type = cg_infer_type(cg, target)
+        let value_type: *Type = cg_infer_type(cg, (^s).assign_value)
+        let target_kind: i32 = (^target_type).kind
+        let value_kind: i32 = (^value_type).kind
+        let mut actual_value: i32 = value_t
+
+        # Handle type conversions
+        if value_kind == TYPE_I32() and target_kind == TYPE_I8()
+            let conv_t: i32 = cg_next_temp(cg)
+            cg_emit(cg, "  ")
+            cg_emit_temp(cg, conv_t)
+            cg_emit(cg, " = trunc i32 ")
+            cg_emit_operand(cg, value_t)
+            cg_emit(cg, " to i8")
+            cg_newline(cg)
+            actual_value = conv_t
+        end
+
         cg_emit(cg, "  store ")
         cg_type_to_llvm(cg, target_type)
         cg_emit(cg, " ")
-        cg_emit_operand(cg, value_t)
+        cg_emit_operand(cg, actual_value)
         cg_emit(cg, ", ptr ")
         cg_emit_temp(cg, ptr_t)
         cg_newline(cg)
@@ -1284,29 +1567,87 @@ fn cg_gen_if(cg: *CodeGen, s: *Stmt) -> void
     cg_emit(cg, ", label %")
     cg_emit_label(cg, "then", then_lbl)
     cg_emit(cg, ", label %")
-    cg_emit_label(cg, "else", else_lbl)
+    if else_lbl == end_lbl
+        cg_emit_label(cg, "endif", end_lbl)
+    else
+        cg_emit_label(cg, "else", else_lbl)
+    end
     cg_newline(cg)
 
     # Then block
     cg_emit_label(cg, "then", then_lbl)
     cg_emit(cg, ":")
     cg_newline(cg)
+    (^cg).block_terminated = false
     cg_gen_stmts(cg, (^s).if_then)
-    cg_emit(cg, "  br label %")
-    cg_emit_label(cg, "endif", end_lbl)
-    cg_newline(cg)
-
-    # Else block
-    if (^s).if_else != null
-        cg_emit_label(cg, "else", else_lbl)
-        cg_emit(cg, ":")
-        cg_newline(cg)
-        cg_gen_stmts(cg, (^s).if_else)
+    let then_terminated: bool = (^cg).block_terminated
+    if not then_terminated
         cg_emit(cg, "  br label %")
         cg_emit_label(cg, "endif", end_lbl)
         cg_newline(cg)
-    else if else_lbl != end_lbl
-        cg_emit_label(cg, "else", else_lbl)
+    end
+
+    # Else-if blocks
+    let mut else_terminated: bool = false
+    let mut cur_elif: *ElseIfList = (^s).if_else_ifs
+    let mut prev_else_lbl: i32 = else_lbl
+    while cur_elif != null
+        # Emit the else label for this elif
+        cg_emit_label(cg, "else", prev_else_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+
+        # Generate condition
+        let elif_cond_t: i32 = cg_gen_expr(cg, (^(^cur_elif).elif).cond)
+        let elif_then_lbl: i32 = cg_next_label(cg)
+        let mut elif_else_lbl: i32 = end_lbl
+        if (^cur_elif).next != null or (^s).if_else != null
+            elif_else_lbl = cg_next_label(cg)
+        end
+
+        cg_emit(cg, "  br i1 ")
+        cg_emit_operand(cg, elif_cond_t)
+        cg_emit(cg, ", label %")
+        cg_emit_label(cg, "elifthen", elif_then_lbl)
+        cg_emit(cg, ", label %")
+        if elif_else_lbl == end_lbl
+            cg_emit_label(cg, "endif", end_lbl)
+        else
+            cg_emit_label(cg, "else", elif_else_lbl)
+        end
+        cg_newline(cg)
+
+        # Elif then block
+        cg_emit_label(cg, "elifthen", elif_then_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+        (^cg).block_terminated = false
+        cg_gen_stmts(cg, (^(^cur_elif).elif).body)
+        if not (^cg).block_terminated
+            cg_emit(cg, "  br label %")
+            cg_emit_label(cg, "endif", end_lbl)
+            cg_newline(cg)
+        end
+
+        prev_else_lbl = elif_else_lbl
+        cur_elif = (^cur_elif).next
+    end
+
+    # Else block
+    if (^s).if_else != null
+        cg_emit_label(cg, "else", prev_else_lbl)
+        cg_emit(cg, ":")
+        cg_newline(cg)
+        (^cg).block_terminated = false
+        cg_gen_stmts(cg, (^s).if_else)
+        else_terminated = (^cg).block_terminated
+        if not else_terminated
+            cg_emit(cg, "  br label %")
+            cg_emit_label(cg, "endif", end_lbl)
+            cg_newline(cg)
+        end
+    else if prev_else_lbl != end_lbl
+        cg_emit_label(cg, "else", prev_else_lbl)
         cg_emit(cg, ":")
         cg_newline(cg)
         cg_emit(cg, "  br label %")
@@ -1317,6 +1658,15 @@ fn cg_gen_if(cg: *CodeGen, s: *Stmt) -> void
     cg_emit_label(cg, "endif", end_lbl)
     cg_emit(cg, ":")
     cg_newline(cg)
+    # If both branches terminated (returned), endif has no predecessors
+    # Need unreachable to make it a valid block
+    if then_terminated and else_terminated
+        cg_emit(cg, "  unreachable")
+        cg_newline(cg)
+        (^cg).block_terminated = true
+    else
+        (^cg).block_terminated = false
+    end
 end
 
 fn cg_gen_while(cg: *CodeGen, s: *Stmt) -> void
@@ -1483,12 +1833,32 @@ fn cg_gen_return(cg: *CodeGen, s: *Stmt) -> void
     else
         let val_t: i32 = cg_gen_expr(cg, (^s).return_value)
         let val_type: *Type = cg_infer_type(cg, (^s).return_value)
+        let ret_type: *Type = (^cg).current_return_type
+        let mut actual_val: i32 = val_t
+
+        # Convert i64 to i32 if needed
+        if ret_type != null
+            let ret_kind: i32 = (^ret_type).kind
+            let val_kind: i32 = (^val_type).kind
+            if val_kind == TYPE_I64() and ret_kind == TYPE_I32()
+                let conv_t: i32 = cg_next_temp(cg)
+                cg_emit(cg, "  ")
+                cg_emit_temp(cg, conv_t)
+                cg_emit(cg, " = trunc i64 ")
+                cg_emit_operand(cg, val_t)
+                cg_emit(cg, " to i32")
+                cg_newline(cg)
+                actual_val = conv_t
+            end
+        end
+
         cg_emit(cg, "  ret ")
-        cg_type_to_llvm(cg, val_type)
+        cg_type_to_llvm(cg, ret_type)
         cg_emit(cg, " ")
-        cg_emit_operand(cg, val_t)
+        cg_emit_operand(cg, actual_val)
         cg_newline(cg)
     end
+    (^cg).block_terminated = true
 end
 
 fn cg_gen_stmts(cg: *CodeGen, stmts: *StmtList) -> void
@@ -1532,6 +1902,7 @@ fn cg_gen_function(cg: *CodeGen, d: *Decl) -> void
     (^cg).variables = null
     (^cg).temp_counter = 0
     (^cg).var_counter = 0
+    (^cg).current_return_type = (^d).return_type
 
     cg_emit(cg, "define ")
     cg_type_to_llvm(cg, (^d).return_type)
@@ -1713,28 +2084,75 @@ fn cg_gen_program(cg: *CodeGen, prog: *Program) -> void
         let mut str_cur: *StringList = (^cg).strings
         while str_cur != null
             let sc: *StringConst = (^str_cur).sc
+
+            # First pass: count actual length (processing escapes)
+            let mut actual_len: i32 = 0
+            let mut j: i32 = 0
+            while j < (^sc).value_len
+                if (^sc).value[j] == 92 and j + 1 < (^sc).value_len
+                    # Escape sequence - counts as 1 char
+                    j = j + 2
+                else
+                    j = j + 1
+                end
+                actual_len = actual_len + 1
+            end
+
             cg_emit(cg, (^sc).name)
             cg_emit(cg, " = private unnamed_addr constant [")
-            cg_emit_int(cg, (^sc).value_len + 1)
+            cg_emit_int(cg, actual_len + 1)
             cg_emit(cg, " x i8] c\"")
-            # Emit escaped string
+
+            # Emit escaped string, processing source escape sequences
             let mut i: i32 = 0
             while i < (^sc).value_len
                 let c: i32 = (^sc).value[i]
-                if c == 10
+                if c == 92 and i + 1 < (^sc).value_len
+                    # Escape sequence in source
+                    let next: i32 = (^sc).value[i + 1]
+                    if next == 110
+                        # \n -> newline
+                        cg_emit(cg, "\\0A")
+                    else if next == 114
+                        # \r -> carriage return
+                        cg_emit(cg, "\\0D")
+                    else if next == 116
+                        # \t -> tab
+                        cg_emit(cg, "\\09")
+                    else if next == 34
+                        # \" -> quote
+                        cg_emit(cg, "\\22")
+                    else if next == 92
+                        # \\ -> backslash
+                        cg_emit(cg, "\\5C")
+                    else if next == 48
+                        # \0 -> null
+                        cg_emit(cg, "\\00")
+                    else
+                        # Unknown escape, emit both chars as-is
+                        cg_emit(cg, "\\5C")
+                        cg_emit_char(cg, next)
+                    end
+                    i = i + 2
+                else if c == 10
                     cg_emit(cg, "\\0A")
+                    i = i + 1
                 else if c == 13
                     cg_emit(cg, "\\0D")
+                    i = i + 1
                 else if c == 9
                     cg_emit(cg, "\\09")
+                    i = i + 1
                 else if c == 34
                     cg_emit(cg, "\\22")
+                    i = i + 1
                 else if c == 92
                     cg_emit(cg, "\\5C")
+                    i = i + 1
                 else
                     cg_emit_char(cg, c)
+                    i = i + 1
                 end
-                i = i + 1
             end
             cg_emit(cg, "\\00\"")
             cg_newline(cg)

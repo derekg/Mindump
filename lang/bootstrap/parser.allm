@@ -95,7 +95,8 @@ end
 
 fn token_array_new() -> *TokenArray
     let arr: *TokenArray = malloc(32) as *TokenArray
-    (^arr).tokens = malloc(1024) as *Token
+    # Token is ~24-32 bytes, allocate 64 * 40 = 2560 bytes to be safe
+    (^arr).tokens = malloc(2560) as *Token
     (^arr).count = 0
     (^arr).capacity = 64
     return arr
